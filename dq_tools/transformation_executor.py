@@ -88,7 +88,9 @@ def snapshot_working(session_id: str, label: str) -> None:
 
 
 def restore_working(session_id: str, label: str) -> None:
-    """Replace ``working_data`` with the contents of a labelled snapshot table."""
+    """Replace ``working_data`` with the contents of a labelled snapshot table.
+
+    Raises a DuckDB CatalogException if the snapshot table does not exist."""
     table = _snapshot_table(label)
     with session_db_lock(session_id):
         con = duckdb_connect(str(_db_path(session_id)))

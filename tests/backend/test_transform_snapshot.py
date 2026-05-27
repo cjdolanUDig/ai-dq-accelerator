@@ -1,3 +1,4 @@
+import pytest
 import pandas as pd
 
 from dq_tools.db import duckdb_connect
@@ -52,3 +53,11 @@ def test_drop_working_snapshot_removes_table(tmp_path, monkeypatch):
     tables = {row[0] for row in con.execute("SHOW TABLES").fetchall()}
     con.close()
     assert "working_data__pre_step_0" not in tables
+    assert "working_data" in tables
+
+
+def test_unsafe_label_is_rejected(tmp_path, monkeypatch):
+    df = pd.DataFrame({"a": [1]})
+    _make_session(tmp_path, monkeypatch, df)
+    with pytest.raises(ValueError):
+        snapshot_working("sess1", "bad-label!")
