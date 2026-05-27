@@ -122,6 +122,7 @@ export default function WorkspacePage() {
           events={events}
           isStreaming={isStreaming}
           waitingMessage={WAITING_MESSAGES[stage]}
+          viewingStage={displayStage}
         />
       </div>
     </div>

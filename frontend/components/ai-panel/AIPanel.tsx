@@ -9,6 +9,8 @@ interface Props {
   events: AIEvent[]
   isStreaming: boolean
   waitingMessage?: string
+  /** The stage currently being viewed; activity defaults to this stage. */
+  viewingStage?: string
 }
 
 const COLLAPSED_STORAGE_KEY = 'ai-panel-collapsed'
@@ -40,8 +42,9 @@ function formatRunDuration(ms: number): string {
   return remM === 0 ? `${h}h` : `${h}h ${remM}m`
 }
 
-export function AIPanel({ events, isStreaming, waitingMessage }: Props) {
+export function AIPanel({ events, isStreaming, waitingMessage, viewingStage }: Props) {
   const [view, setView] = useState<'feed' | 'terminal'>('feed')
+  const [scope, setScope] = useState<'stage' | 'all'>('stage')
   const [collapsed, setCollapsed] = useState<boolean>(false)
   const [width, setWidth] = useState<number>(DEFAULT_WIDTH)
   const dragStartRef = useRef<{ pointerX: number; width: number } | null>(null)
@@ -120,6 +123,14 @@ export function AIPanel({ events, isStreaming, waitingMessage }: Props) {
 
   const statusClass = isStreaming ? 'bg-success' : waitingMessage ? 'bg-warning' : 'bg-fg-subtle'
 
+  const visibleEvents =
+    scope === 'all' || !viewingStage
+      ? events
+      : events.filter((e) => {
+          const s = (e as Record<string, unknown>).stage
+          return s == null || s === viewingStage
+        })
+
   // ── Collapsed rail ──
   if (collapsed) {
     return (
@@ -170,6 +181,22 @@ export function AIPanel({ events, isStreaming, waitingMessage }: Props) {
         <span className={['w-2 h-2 rounded-full shrink-0', statusClass].join(' ')} />
         <span className="text-[12px] leading-[14px] font-semibold text-fg">AI Activity</span>
         <div className="flex-1" />
+        {/* Scope toggle */}
+        <div className="h-7 flex items-center bg-elevated rounded-md p-0.5 gap-0.5">
+          {(['stage', 'all'] as const).map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setScope(s)}
+              className={[
+                'text-xs px-2.5 py-1 rounded-md capitalize transition-colors',
+                scope === s ? 'bg-surface text-fg border border-border' : 'text-fg-muted hover:text-fg',
+              ].join(' ')}
+            >
+              {s === 'stage' ? 'This stage' : 'All'}
+            </button>
+          ))}
+        </div>
         {/* Segmented control */}
         <div className="h-7 flex items-center bg-elevated rounded-md p-0.5 gap-0.5">
           {(['feed', 'terminal'] as const).map((v) => (
@@ -191,7 +218,7 @@ export function AIPanel({ events, isStreaming, waitingMessage }: Props) {
       </div>
 
       {/* Feed / Terminal */}
-      {view === 'feed' ? <EventFeed events={events} /> : <EventTerminal events={events} />}
+      {view === 'feed' ? <EventFeed events={visibleEvents} /> : <EventTerminal events={visibleEvents} />}
 
       {/* Footer — running indicator wins over waiting banner */}
       {isStreaming && runStartedAt !== null ? (
