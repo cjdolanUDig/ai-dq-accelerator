@@ -22,6 +22,7 @@ from backend.api.schemas import (
     TransformationPreview,
     TransformationLogEntry,
 )
+from backend.api._workflow import is_workflow_running
 from backend.db.engine import get_sessionmaker
 from backend.db.repository import insert_session, list_active_sessions, delete_session as db_delete_session, get_snapshot, get_session_row
 from backend.temporal.workflows.dq_workflow import DQAcceleratorWorkflow
@@ -179,66 +180,79 @@ async def delete_session(session_id: str, request: Request):
     return Response(status_code=204)
 
 
+async def _hydrate_session_from_db(session_id: str) -> dict | None:
+    """Reconstruct session state from the DB row + most-advanced snapshot.
+
+    Returns None when the session row does not exist. Used for any workflow that
+    is not actively RUNNING — querying a closed workflow forces a full-history
+    replay on the worker, so completed sessions are served from snapshots."""
+    try:
+        sid_uuid = _uuid.UUID(session_id)
+    except ValueError:
+        return None
+    sm = get_sessionmaker()
+    async with sm() as db:
+        row = await get_session_row(db, sid_uuid)
+        if row is None:
+            return None
+        # Pick the most-advanced snapshot to hydrate fields. Order matches the workflow.
+        STAGE_ORDER = ["pipeline", "scorecard", "transform", "plan", "triage",
+                       "validate", "rules", "explore", "profile"]
+        payload: dict = {}
+        for stage_name in STAGE_ORDER:
+            snap = await get_snapshot(db, sid_uuid, stage_name)
+            if snap is not None:
+                payload = {**snap.payload, **payload}  # earlier stage values fill gaps
+    return {
+        "stage": row.stage,
+        "session_id": session_id,
+        "profile": payload.get("profile", {}),
+        "ai_summary": payload.get("ai_summary", ""),
+        "suggested_rules": payload.get("suggested_rules", []),
+        "baseline_quality_score": row.baseline_score or 0.0,
+        "current_score": row.current_score or 0.0,
+        "validation_summary": payload.get("validation_summary", ""),
+        "anomaly_summary": payload.get("anomaly_summary", ""),
+        "current_suggestion": None,
+        "current_preview": None,
+        "transformation_log": payload.get("transformation_log", []),
+        "scorecard": payload.get("scorecard", {}),
+        "narrative": payload.get("narrative", ""),
+        "output_dir": row.output_dir or "",
+        "zip_path": row.zip_path or "",
+        "validation_results": payload.get("validation_results", {}),
+        "triage_result": payload.get("triage_result", {}),
+        "transform_plan": payload.get("transform_plan"),
+        "execution_escalation": payload.get("execution_escalation"),
+    }
+
+
 @router.get("/sessions/{session_id}", response_model=SessionStateResponse)
 async def get_session(session_id: str, request: Request):
     """Get current state of a DQ session.
 
-    Reads live from the Temporal workflow when available. If Temporal returns
-    NOT_FOUND (workflow retention expired), hydrates from the DB row + the
-    most-advanced snapshot."""
+    Queries the live Temporal workflow only while it is RUNNING. Once the
+    workflow is closed (or retention has expired), state is served from DB
+    snapshots — querying a closed workflow forces the worker to replay the entire
+    history on every poll, which under the frontend's 2s polling saturates the
+    worker's gRPC connection."""
     client = request.app.state.temporal_client
+    handle = client.get_workflow_handle(session_id)
     state: dict | None = None
-    try:
-        handle = client.get_workflow_handle(session_id)
-        state = await handle.query(DQAcceleratorWorkflow.get_full_state)
-    except RPCError as e:
-        if e.status != RPCStatusCode.NOT_FOUND:
+    if await is_workflow_running(handle):
+        try:
+            state = await handle.query(DQAcceleratorWorkflow.get_full_state)
+        except RPCError as e:
+            if e.status != RPCStatusCode.NOT_FOUND:
+                raise HTTPException(status_code=500, detail=str(e))
+            # workflow vanished between describe and query — fall through to DB
+        except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
-        # fall through to DB hydration
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
     if state is None:
-        # Hydrate from DB
-        try:
-            sid_uuid = _uuid.UUID(session_id)
-        except ValueError:
+        state = await _hydrate_session_from_db(session_id)
+        if state is None:
             raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
-        sm = get_sessionmaker()
-        async with sm() as db:
-            row = await get_session_row(db, sid_uuid)
-            if row is None:
-                raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
-            # Pick the most-advanced snapshot to hydrate fields. Order matches the workflow.
-            STAGE_ORDER = ["pipeline", "scorecard", "transform", "plan", "triage",
-                           "validate", "rules", "explore", "profile"]
-            payload: dict = {}
-            for stage_name in STAGE_ORDER:
-                snap = await get_snapshot(db, sid_uuid, stage_name)
-                if snap is not None:
-                    payload = {**snap.payload, **payload}  # earlier stage values fill gaps
-        state = {
-            "stage": row.stage,
-            "session_id": session_id,
-            "profile": payload.get("profile", {}),
-            "ai_summary": payload.get("ai_summary", ""),
-            "suggested_rules": payload.get("suggested_rules", []),
-            "baseline_quality_score": row.baseline_score or 0.0,
-            "current_score": row.current_score or 0.0,
-            "validation_summary": payload.get("validation_summary", ""),
-            "anomaly_summary": payload.get("anomaly_summary", ""),
-            "current_suggestion": None,
-            "current_preview": None,
-            "transformation_log": payload.get("transformation_log", []),
-            "scorecard": payload.get("scorecard", {}),
-            "narrative": payload.get("narrative", ""),
-            "output_dir": row.output_dir or "",
-            "zip_path": row.zip_path or "",
-            "validation_results": payload.get("validation_results", {}),
-            "triage_result": payload.get("triage_result", {}),
-            "transform_plan": payload.get("transform_plan"),
-            "execution_escalation": payload.get("execution_escalation"),
-        }
 
     # Existing response building (unchanged):
     current_suggestion = None

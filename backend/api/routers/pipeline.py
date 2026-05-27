@@ -23,8 +23,9 @@ from backend.api.schemas import (
     TransformationLogEntry,
     WorkflowStage,
 )
+from backend.api._workflow import is_workflow_running
 from backend.db.engine import get_sessionmaker
-from backend.db.repository import get_snapshot
+from backend.db.repository import get_snapshot, get_session_row
 from backend.temporal.workflows.dq_workflow import DQAcceleratorWorkflow
 
 router = APIRouter()
@@ -76,35 +77,83 @@ def _load_approved_rules(session_id: str) -> list:
         return []
 
 
+async def _hydrate_scorecard_from_db(session_id: str) -> dict | None:
+    """Reconstruct the scorecard view from DB snapshots for closed workflows.
+
+    Returns None when the session row does not exist. Avoids the three live
+    queries (get_scorecard, get_stage, get_full_state) that each force a
+    full-history replay on the worker for a completed session."""
+    try:
+        sid_uuid = _uuid.UUID(session_id)
+    except ValueError:
+        return None
+    sm = get_sessionmaker()
+    async with sm() as db:
+        row = await get_session_row(db, sid_uuid)
+        if row is None:
+            return None
+        sc_snap = await get_snapshot(db, sid_uuid, "scorecard")
+        tf_snap = await get_snapshot(db, sid_uuid, "transform")
+    sc_payload = (sc_snap.payload if sc_snap else None) or {}
+    tf_payload = (tf_snap.payload if tf_snap else None) or {}
+    return {
+        "scorecard": sc_payload.get("scorecard", {}),
+        "narrative": sc_payload.get("narrative", ""),
+        "baseline": row.baseline_score or 0.0,
+        "current": row.current_score or 0.0,
+        "stage": row.stage,
+        "transformation_log": tf_payload.get("transformation_log", []),
+    }
+
+
 @router.get("/sessions/{session_id}/scorecard", response_model=ScorecardResponse)
 async def get_scorecard(session_id: str, request: Request):
-    """Get the full scorecard and narrative for the session."""
+    """Get the full scorecard and narrative for the session.
+
+    Queries the live workflow only while RUNNING; a closed (or retention-expired)
+    workflow is served from DB snapshots, so the worker is never forced to replay
+    a completed workflow's history just to render its scorecard."""
     client = request.app.state.temporal_client
+    handle = client.get_workflow_handle(session_id)
 
-    try:
-        handle = client.get_workflow_handle(session_id)
-        scorecard_state = await handle.query(DQAcceleratorWorkflow.get_scorecard)
-        stage_str = await handle.query(DQAcceleratorWorkflow.get_stage)
-    except RPCError as e:
-        if e.status == RPCStatusCode.NOT_FOUND:
+    scorecard: dict = {}
+    narrative = ""
+    baseline = 0.0
+    current = 0.0
+    stage_str = "LOADING"
+    transformation_log_raw: list = []
+
+    if await is_workflow_running(handle):
+        try:
+            scorecard_state = await handle.query(DQAcceleratorWorkflow.get_scorecard)
+            stage_str = await handle.query(DQAcceleratorWorkflow.get_stage)
+        except RPCError as e:
+            if e.status == RPCStatusCode.NOT_FOUND:
+                raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
+            raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        scorecard = scorecard_state.get("scorecard", {})
+        narrative = scorecard_state.get("narrative", "")
+        baseline = scorecard_state.get("baseline_score", 0.0)
+        current = scorecard_state.get("current_score", 0.0)
+        try:
+            full_state = await handle.query(DQAcceleratorWorkflow.get_full_state)
+            transformation_log_raw = full_state.get("transformation_log", [])
+        except Exception:
+            transformation_log_raw = []
+    else:
+        hydrated = await _hydrate_scorecard_from_db(session_id)
+        if hydrated is None:
             raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        scorecard = hydrated["scorecard"]
+        narrative = hydrated["narrative"]
+        baseline = hydrated["baseline"]
+        current = hydrated["current"]
+        stage_str = hydrated["stage"]
+        transformation_log_raw = hydrated["transformation_log"]
 
-    scorecard = scorecard_state.get("scorecard", {})
-    baseline = scorecard_state.get("baseline_score", 0.0)
-    current = scorecard_state.get("current_score", 0.0)
-
-    # Extract transformation log from full state for the scorecard view
-    full_state: dict = {}
-    try:
-        full_state = await handle.query(DQAcceleratorWorkflow.get_full_state)
-        transformation_log = [
-            TransformationLogEntry(**e) for e in full_state.get("transformation_log", [])
-        ]
-    except Exception:
-        transformation_log = []
+    transformation_log = [TransformationLogEntry(**e) for e in transformation_log_raw]
 
     # ── Per-rule initial→final comparison ────────────────────────────────────
     rule_comparison: list[RuleComparisonEntry] = []
@@ -116,7 +165,7 @@ async def get_scorecard(session_id: str, request: Request):
             snap = await get_snapshot(db, sid_uuid, "validate")
         if snap is not None:
             initial_per_rule = (snap.payload or {}).get("validation_results", {}).get("per_rule", [])
-        final_per_rule = latest_post_step_per_rule(full_state.get("transformation_log", []))
+        final_per_rule = latest_post_step_per_rule(transformation_log_raw)
         rule_comparison = [
             RuleComparisonEntry(**e) for e in build_rule_comparison(initial_per_rule, final_per_rule)
         ]
@@ -134,7 +183,7 @@ async def get_scorecard(session_id: str, request: Request):
         rows_modified=scorecard.get("rows_modified", 0),
         rules_passing=scorecard.get("rules_passing", 0),
         rules_total=scorecard.get("rules_total", 0),
-        narrative=scorecard_state.get("narrative", ""),
+        narrative=narrative,
         transformation_log=transformation_log,
         rule_comparison=rule_comparison,
     )

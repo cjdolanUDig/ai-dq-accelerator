@@ -39,6 +39,28 @@ ACTIVITY_RETRY = RetryPolicy(maximum_attempts=3, initial_interval=timedelta(seco
 ACTIVITY_TIMEOUT = timedelta(minutes=10)
 AI_ACTIVITY_TIMEOUT = timedelta(minutes=60)
 
+# Cap on sample_failing_rows kept per rule in workflow state/history. The scorecard
+# comparison surfaces at most 20 rows and ValidateStage shows 5, so this loses
+# nothing downstream while keeping history small — unbounded rows reached ~80KB
+# across 35 rules, bloating every snapshot input and replay.
+MAX_FAILING_ROWS = 20
+
+
+def _cap_failing_rows(validation_results: dict, limit: int = MAX_FAILING_ROWS) -> dict:
+    """Bound sample_failing_rows per rule before it enters workflow state/history."""
+    per_rule = validation_results.get("per_rule")
+    if not per_rule:
+        return validation_results
+    return {
+        **validation_results,
+        "per_rule": [
+            {**r, "sample_failing_rows": (r.get("sample_failing_rows") or [])[:limit]}
+            if r.get("sample_failing_rows")
+            else r
+            for r in per_rule
+        ],
+    }
+
 
 @workflow.defn
 class DQAcceleratorWorkflow:
@@ -438,7 +460,7 @@ class DQAcceleratorWorkflow:
             start_to_close_timeout=ACTIVITY_TIMEOUT,
             retry_policy=ACTIVITY_RETRY,
         )
-        self.validation_results = validation_result["validation_results"]
+        self.validation_results = _cap_failing_rows(validation_result["validation_results"])
         self.baseline_quality_score = validation_result["baseline_quality_score"]
         self.current_score = self.baseline_quality_score
 
@@ -532,7 +554,7 @@ class DQAcceleratorWorkflow:
                     start_to_close_timeout=ACTIVITY_TIMEOUT,
                     retry_policy=ACTIVITY_RETRY,
                 )
-                self.validation_results = amended_validation["validation_results"]
+                self.validation_results = _cap_failing_rows(amended_validation["validation_results"])
                 self.baseline_quality_score = amended_validation["baseline_quality_score"]
                 self.current_score = self.baseline_quality_score
 
@@ -842,13 +864,13 @@ class DQAcceleratorWorkflow:
             actual_score_delta = new_score - pre_step_score
             self.current_score = new_score
             new_per_rule = scorecard_result.get("per_rule", [])
-            self.validation_results = {
+            self.validation_results = _cap_failing_rows({
                 "per_rule": new_per_rule or self.validation_results.get("per_rule", []),
                 "category_scores": scorecard_result.get(
                     "category_scores", self.validation_results.get("category_scores", {})
                 ),
                 "baseline_quality_score": self.baseline_quality_score,
-            }
+            })
 
             # 6. Detect regressions (only rules NOT in targets_rules that newly failed)
             targets = set(step.get("targets_rules", []))
