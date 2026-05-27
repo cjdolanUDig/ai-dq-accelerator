@@ -8,16 +8,16 @@ import pandas as pd
 import anthropic
 
 from backend.agents.emit import emit as _emit_raw
+from backend.agents.retry import call_claude_with_retry
+from backend.agents.graphs.planning_tools import get_planning_tools_schema, execute_planning_tool
+
+MODEL = "claude-sonnet-4-6"
 
 _STAGE = "transform"
 
 
 def emit(session_id: str, event: str, **kw) -> None:
     _emit_raw(session_id, event, stage=_STAGE, **kw)
-from backend.agents.retry import call_claude_with_retry
-from backend.agents.graphs.planning_tools import get_planning_tools_schema, execute_planning_tool
-
-MODEL = "claude-sonnet-4-6"
 MAX_ATTEMPTS = 3
 
 _UNSAFE_PATTERNS = [

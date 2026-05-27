@@ -4,17 +4,17 @@ import anthropic
 from langgraph.graph import END, StateGraph
 
 from backend.agents.emit import emit as _emit_raw
+from backend.agents.prompts import SCORECARD_NARRATOR_SYSTEM
+from backend.agents.retry import call_claude_with_retry
+from backend.agents.state import ScorecardNarratorState
+
+MODEL = "claude-sonnet-4-6"
 
 _STAGE = "scorecard"
 
 
 def emit(session_id: str, event: str, **kw) -> None:
     _emit_raw(session_id, event, stage=_STAGE, **kw)
-from backend.agents.prompts import SCORECARD_NARRATOR_SYSTEM
-from backend.agents.retry import call_claude_with_retry
-from backend.agents.state import ScorecardNarratorState
-
-MODEL = "claude-sonnet-4-6"
 
 
 def write_narrative(state: ScorecardNarratorState) -> ScorecardNarratorState:

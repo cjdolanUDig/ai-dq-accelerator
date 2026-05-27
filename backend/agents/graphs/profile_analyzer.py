@@ -14,13 +14,6 @@ import re
 from pathlib import Path
 
 from backend.agents.emit import emit as _emit_raw, _find_project_root, cap_result
-
-
-_STAGE = "profile"
-
-
-def _emit(session_id: str, event: str, **kw) -> None:
-    _emit_raw(session_id, event, stage=_STAGE, **kw)
 from backend.agents.retry import call_claude_with_retry
 from langgraph.graph import END, StateGraph
 from backend.agents.prompts import (
@@ -42,6 +35,12 @@ from dq_tools.explorer import (
 from dq_tools.rule_engine import rule_to_sodacl_check
 
 logger = logging.getLogger(__name__)
+
+_STAGE = "profile"
+
+
+def _emit(session_id: str, event: str, **kw) -> None:
+    _emit_raw(session_id, event, stage=_STAGE, **kw)
 
 
 def _load_profile_summary(session_id: str) -> dict:

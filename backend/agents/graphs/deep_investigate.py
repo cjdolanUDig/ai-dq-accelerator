@@ -24,7 +24,13 @@ from langgraph.prebuilt import ToolRuntime
 from backend.agents.emit import _find_project_root
 from backend.agents.emit import emit as _emit_raw, cap_result
 import json as _json
+from backend.agents.prompts import PROFILE_INVESTIGATION_SYSTEM
+from backend.agents.state import ProfileAnalyzerState
+import dq_tools.explorer as _explorer
+from deepagents.graph import create_deep_agent
+from langchain_anthropic import ChatAnthropic
 
+logger = logging.getLogger(__name__)
 
 _STAGE = "explore"
 
@@ -42,13 +48,6 @@ def _result_payload(content):
         except (ValueError, TypeError):
             return cap_result(content)
     return cap_result(content)
-from backend.agents.prompts import PROFILE_INVESTIGATION_SYSTEM
-from backend.agents.state import ProfileAnalyzerState
-import dq_tools.explorer as _explorer
-from deepagents.graph import create_deep_agent
-from langchain_anthropic import ChatAnthropic
-
-logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------

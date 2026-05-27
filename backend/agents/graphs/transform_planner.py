@@ -5,13 +5,13 @@ import anthropic
 from langgraph.graph import StateGraph, END
 
 from backend.agents.emit import emit as _emit_raw
+from backend.agents.graphs.deep_plan import deep_plan_node
 
 _STAGE = "plan"
 
 
 def emit(session_id: str, event: str, **kw) -> None:
     _emit_raw(session_id, event, stage=_STAGE, **kw)
-from backend.agents.graphs.deep_plan import deep_plan_node
 
 
 class TransformPlannerState(TypedDict):

@@ -21,18 +21,18 @@ from langgraph.errors import GraphRecursionError
 from langgraph.prebuilt import ToolRuntime
 
 from backend.agents.emit import _find_project_root, emit as _emit_raw
-
-_STAGE = "plan"
-
-
-def _emit(session_id: str, event: str, **kw) -> None:
-    _emit_raw(session_id, event, stage=_STAGE, **kw)
 from backend.agents.prompts import TRANSFORM_PLANNER_SYSTEM
 import dq_tools.explorer as _explorer
 from deepagents.graph import create_deep_agent
 from langchain_anthropic import ChatAnthropic
 
 logger = logging.getLogger(__name__)
+
+_STAGE = "plan"
+
+
+def _emit(session_id: str, event: str, **kw) -> None:
+    _emit_raw(session_id, event, stage=_STAGE, **kw)
 
 
 # ---------------------------------------------------------------------------

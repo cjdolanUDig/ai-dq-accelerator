@@ -7,17 +7,17 @@ import pandas as pd
 from langgraph.graph import StateGraph, END
 
 from backend.agents.emit import emit as _emit_raw
+from backend.agents.retry import call_claude_with_retry
+from backend.agents.state import TransformationAdvisorState
+from backend.agents.prompts import TRANSFORMATION_ADVISOR_SYSTEM
+
+MODEL = "claude-sonnet-4-6"
 
 _STAGE = "transform"
 
 
 def emit(session_id: str, event: str, **kw) -> None:
     _emit_raw(session_id, event, stage=_STAGE, **kw)
-from backend.agents.retry import call_claude_with_retry
-from backend.agents.state import TransformationAdvisorState
-from backend.agents.prompts import TRANSFORMATION_ADVISOR_SYSTEM
-
-MODEL = "claude-sonnet-4-6"
 
 # Use the full builtins module — the real security boundary is _UNSAFE_PATTERNS
 # (blocks import, open, os, sys, subprocess, eval, exec).
