@@ -294,6 +294,17 @@ class TransformationDecisionResponse(BaseModel):
 # ── GET /sessions/{id}/scorecard ─────────────────────────────────────────────
 
 
+class RuleComparisonEntry(BaseModel):
+    id: str
+    check: str = ""
+    column: str | None = None
+    initial_passed: bool
+    initial_failures: int
+    final_passed: bool
+    final_failures: int
+    status: str  # fixed | regressed | improved | worsened | unchanged
+
+
 class ScorecardResponse(BaseModel):
     stage: WorkflowStage
     baseline_score: float
@@ -307,6 +318,7 @@ class ScorecardResponse(BaseModel):
     rules_total: int = 0
     narrative: str = ""
     transformation_log: list[TransformationLogEntry] = []
+    rule_comparison: list[RuleComparisonEntry] = []
 
 
 # ── POST /sessions/{id}/pipeline/generate ────────────────────────────────────

@@ -50,3 +50,18 @@ def test_latest_post_step_per_rule_picks_last_nonempty():
 def test_latest_post_step_per_rule_empty_when_none():
     assert latest_post_step_per_rule([{"id": "s1"}, {"id": "s2"}]) == []
     assert latest_post_step_per_rule([]) == []
+
+
+def test_scorecard_response_accepts_rule_comparison():
+    from backend.api.schemas import ScorecardResponse, RuleComparisonEntry, WorkflowStage
+    entry = RuleComparisonEntry(
+        id="r1", check="not_null", column="email",
+        initial_passed=False, initial_failures=412,
+        final_passed=True, final_failures=0, status="fixed",
+    )
+    resp = ScorecardResponse(
+        stage=WorkflowStage.COMPLETE, baseline_score=0.5, final_score=0.9, delta=0.4,
+        rule_comparison=[entry],
+    )
+    assert resp.rule_comparison[0].status == "fixed"
+    assert ScorecardResponse(stage=WorkflowStage.COMPLETE, baseline_score=0, final_score=0, delta=0).rule_comparison == []

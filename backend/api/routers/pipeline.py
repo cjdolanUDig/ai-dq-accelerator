@@ -12,13 +12,19 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from temporalio.service import RPCError, RPCStatusCode
 
+import uuid as _uuid
+
+from backend.api.rule_comparison import build_rule_comparison, latest_post_step_per_rule
 from backend.api.schemas import (
     PipelineGenerateRequest,
     PipelineGenerateResponse,
+    RuleComparisonEntry,
     ScorecardResponse,
     TransformationLogEntry,
     WorkflowStage,
 )
+from backend.db.engine import get_sessionmaker
+from backend.db.repository import get_snapshot
 from backend.temporal.workflows.dq_workflow import DQAcceleratorWorkflow
 
 router = APIRouter()
@@ -91,6 +97,7 @@ async def get_scorecard(session_id: str, request: Request):
     current = scorecard_state.get("current_score", 0.0)
 
     # Extract transformation log from full state for the scorecard view
+    full_state: dict = {}
     try:
         full_state = await handle.query(DQAcceleratorWorkflow.get_full_state)
         transformation_log = [
@@ -98,6 +105,23 @@ async def get_scorecard(session_id: str, request: Request):
         ]
     except Exception:
         transformation_log = []
+
+    # ── Per-rule initial→final comparison ────────────────────────────────────
+    rule_comparison: list[RuleComparisonEntry] = []
+    try:
+        initial_per_rule: list = []
+        sid_uuid = _uuid.UUID(session_id)
+        sm = get_sessionmaker()
+        async with sm() as db:
+            snap = await get_snapshot(db, sid_uuid, "validate")
+        if snap is not None:
+            initial_per_rule = (snap.payload or {}).get("validation_results", {}).get("per_rule", [])
+        final_per_rule = latest_post_step_per_rule(full_state.get("transformation_log", []))
+        rule_comparison = [
+            RuleComparisonEntry(**e) for e in build_rule_comparison(initial_per_rule, final_per_rule)
+        ]
+    except Exception:
+        rule_comparison = []
 
     return ScorecardResponse(
         stage=WorkflowStage(stage_str),
@@ -112,6 +136,7 @@ async def get_scorecard(session_id: str, request: Request):
         rules_total=scorecard.get("rules_total", 0),
         narrative=scorecard_state.get("narrative", ""),
         transformation_log=transformation_log,
+        rule_comparison=rule_comparison,
     )
 
 
