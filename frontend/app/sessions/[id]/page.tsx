@@ -53,8 +53,11 @@ const WAITING_MESSAGES: Record<string, string> = {
 export default function WorkspacePage() {
   const { id } = useParams<{ id: string }>()
   const [viewingStage, setViewingStage] = useState<StageId | null>(null)
-  const isViewingPast = viewingStage !== null
-  const { session, isLoading } = useSession(id, { enabled: !isViewingPast })
+  // Always poll live session state. The past-stage review below reads its own
+  // snapshot via SnapshotStageView, so gating this poll on "viewing a past stage"
+  // only made `session` (and the derived `active`) vanish — which fired the
+  // [active] reset effect and snapped the user back to the current stage.
+  const { session, isLoading } = useSession(id)
   const { events, isDone } = useAIStream(id)
   const { sessions } = useSessionsList()
 
