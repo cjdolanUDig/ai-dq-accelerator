@@ -58,11 +58,13 @@ export default function WorkspacePage() {
   // only made `session` (and the derived `active`) vanish — which fired the
   // [active] reset effect and snapped the user back to the current stage.
   const { session, isLoading } = useSession(id)
-  const { events, isDone } = useAIStream(id)
+  const stage = session?.stage ?? 'LOADING'
+  // Stop the AI stream once the workflow is terminal; keep it open across all
+  // earlier stages so PLAN (and every other post-profiling stage) emits activity.
+  const { events, isDone } = useAIStream(id, stage === 'COMPLETE')
   const { sessions } = useSessionsList()
 
   const filename = sessions.find(s => s.id === id)?.filename ?? id
-  const stage = session?.stage ?? 'LOADING'
   const { active, completed } = workflowToStepper(stage)
 
   // auto-advance viewing stage when workflow advances

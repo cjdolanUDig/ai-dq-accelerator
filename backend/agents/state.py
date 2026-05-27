@@ -63,6 +63,7 @@ class TransformationAdvisorState(TypedDict):
 class TriageAgentState(TypedDict):
     session_id: str
     failing_rules: list[dict]   # per_rule entries where passed=False
+    passing_rules: list[dict]   # per_rule entries where passed=True (for contradiction detection)
     use_case: str
     # Outputs
     classifications: list[dict]

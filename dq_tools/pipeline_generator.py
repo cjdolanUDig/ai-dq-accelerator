@@ -396,8 +396,8 @@ def _generate_python_pipeline(
                 blocks.append(f"    df[{col!r}] = _s_{t_id}")
 
             elif t_type == "custom":
-                code_str = params.get("code", "")
-                desc = params.get("description", "custom transformation")
+                code_str = params.get("code") or t.get("custom_code", "")
+                desc = params.get("description", t.get("rationale", "custom transformation"))
                 # Embed the custom code inline as a nested function
                 blocks.append(f"    # Custom: {desc}")
                 indented_code = textwrap.indent(code_str, "    ")
@@ -924,9 +924,12 @@ def generate(
                     tmpl = env.get_template(tmpl_path)
                     rendered = tmpl.render(
                         task_id=f"{transform.get('id', 'custom')}_transform",
-                        code=transform.get("params", {}).get("code", ""),
+                        code=(
+                            transform.get("custom_code")
+                            or transform.get("params", {}).get("code", "")
+                        ),
                         description=transform.get("params", {}).get(
-                            "description", "Custom transformation"
+                            "description", transform.get("rationale", "Custom transformation")
                         ),
                         use_case=target_env.get("use_case", session_id),
                         generated_at=datetime.now(timezone.utc).isoformat(),

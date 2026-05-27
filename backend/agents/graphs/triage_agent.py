@@ -141,20 +141,36 @@ def _validate_classifications(classifications: list[dict], failing_rules: list[d
     return clean
 
 
+def _slim_rule_for_contradiction(r: dict) -> dict:
+    """Compact rule view for the contradiction prompt — identity + threshold info,
+    no sample rows."""
+    return {
+        k: r[k]
+        for k in ("id", "check", "column", "category", "passed", "failure_rate",
+                  "failure_count", "threshold", "rationale")
+        if k in r
+    }
+
+
 def _detect_triage_contradictions(
     client: anthropic.Anthropic,
     session_id: str,
     classifications: list[dict],
     failing_rules: list[dict],
     use_case: str,
+    passing_rules: list[dict] | None = None,
 ) -> list[dict]:
     """Single LLM call to detect fix-cascade contradictions among classified failing rules.
 
-    Returns a list of contradiction dicts. Returns [] on any failure — never raises.
-    Skips the call entirely when fewer than 2 rules are present.
+    Includes currently-PASSING rules so the model can flag fixes that would break a
+    rule that passes today (the fix_cascade pattern). Returns [] on any failure —
+    never raises. Skips the call entirely when fewer than 2 rules are present.
     """
     if len(classifications) < 2:
         return []
+
+    passing_rules = passing_rules or []
+    passing_for_prompt = [_slim_rule_for_contradiction(r) for r in passing_rules]
 
     try:
         response = call_claude_with_retry(
@@ -168,8 +184,11 @@ def _detect_triage_contradictions(
                     "content": (
                         f"Use case: {use_case}\n\n"
                         f"Classified failing rules:\n```json\n{json.dumps(classifications, indent=2, default=str)}\n```\n\n"
-                        f"Full rule details:\n```json\n{json.dumps(failing_rules, indent=2, default=str)}\n```\n\n"
-                        "Identify fix-cascade contradictions. Output only the JSON object."
+                        f"Full failing-rule details:\n```json\n{json.dumps(failing_rules, indent=2, default=str)}\n```\n\n"
+                        f"Currently PASSING rules (a fix must not break these):\n"
+                        f"```json\n{json.dumps(passing_for_prompt, indent=2, default=str)}\n```\n\n"
+                        "Identify fix-cascade contradictions, including any fix that would break a "
+                        "currently-passing rule. Output only the JSON object."
                     ),
                 }
             ],
@@ -312,7 +331,8 @@ def triage_node(state: TriageAgentState) -> TriageAgentState:
     summary = _build_summary(classifications)
 
     contradictions = _detect_triage_contradictions(
-        client, session_id, classifications, failing_rules, use_case
+        client, session_id, classifications, failing_rules, use_case,
+        passing_rules=state.get("passing_rules", []),
     )
 
     emit(
@@ -336,12 +356,18 @@ def build_triage_graph():
     return graph.compile()
 
 
-def run_triage_agent(session_id: str, failing_rules: list[dict], use_case: str) -> dict:
+def run_triage_agent(
+    session_id: str,
+    failing_rules: list[dict],
+    use_case: str,
+    passing_rules: list[dict] | None = None,
+) -> dict:
     """Run triage agent. Returns {classifications, summary, contradictions}."""
     app = build_triage_graph()
     initial_state: TriageAgentState = {
         "session_id": session_id,
         "failing_rules": failing_rules,
+        "passing_rules": passing_rules or [],
         "use_case": use_case,
         "classifications": [],
         "summary": {},

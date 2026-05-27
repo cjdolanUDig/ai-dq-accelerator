@@ -182,33 +182,29 @@ function StepRow({ step, isApplying }: { step: TransformPlanStep; isApplying: bo
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {step.status === 'applied' &&
-          step.actual_score_delta !== undefined &&
-          step.actual_score_delta !== null ? (
+          (step.actual_resolution ?? step.actual_score_delta) !== undefined &&
+          (step.actual_resolution ?? step.actual_score_delta) !== null ? (
             <>
               <Chip
                 variant="score"
-                tone={step.actual_score_delta >= 0 ? 'success' : 'danger'}
+                tone={(step.actual_resolution ?? 0) > 0 ? 'success' : 'warning'}
+                title="Share of outstanding failures this step resolved"
               >
-                {step.actual_score_delta >= 0 ? '+' : ''}
-                {(step.actual_score_delta * 100).toFixed(1)}%
+                ~{(Math.max(0, step.actual_resolution ?? 0) * 100).toFixed(0)}% fixed
               </Chip>
-              <span className="text-xs text-fg-subtle hidden md:inline">
-                ({(step.projected_score_delta * 100).toFixed(1)}% proj)
-              </span>
+              {step.projected_resolution !== undefined && (
+                <span className="text-xs text-fg-subtle hidden md:inline">
+                  ({(step.projected_resolution * 100).toFixed(0)}% proj)
+                </span>
+              )}
             </>
           ) : step.status === 'pending' ? (
             <Chip
               variant="score"
-              tone={
-                step.projected_score_delta > 0
-                  ? 'success'
-                  : step.projected_score_delta < 0
-                    ? 'danger'
-                    : 'warning'
-              }
+              tone={(step.projected_resolution ?? step.projected_score_delta) > 0 ? 'success' : 'warning'}
+              title="Expected share of outstanding failures this step resolves"
             >
-              {step.projected_score_delta >= 0 ? '+' : ''}
-              {(step.projected_score_delta * 100).toFixed(1)}%
+              ~{(Math.max(0, step.projected_resolution ?? step.projected_score_delta) * 100).toFixed(0)}%
             </Chip>
           ) : null}
         </div>
@@ -352,8 +348,10 @@ function EscalationOverlay({
   }
 
   const lastError = escalation.context.last_error as string | undefined
-  const projected = escalation.context.projected as number | undefined
-  const actual = escalation.context.actual as number | undefined
+  // Divergence escalations now report resolution (share of failures), falling
+  // back to the older score-delta keys for in-flight workflows.
+  const projected = (escalation.context.projected_resolution ?? escalation.context.projected) as number | undefined
+  const actual = (escalation.context.actual_resolution ?? escalation.context.actual) as number | undefined
   const regressedRules = escalation.context.regressed_rule_ids as string[] | undefined
   const beforeSample = Array.isArray(escalation.context.before_sample)
     ? (escalation.context.before_sample as Record<string, unknown>[])

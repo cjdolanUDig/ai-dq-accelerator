@@ -290,6 +290,56 @@ def _apply_transform(df: pd.DataFrame, spec: dict) -> tuple[pd.DataFrame, int]:
     return new_df, affected
 
 
+def _rule_fail_count(df: pd.DataFrame, rule: dict) -> int | None:
+    """Number of rows in *df* that violate *rule*. None when the rule can't be
+    evaluated against this df (missing column / unsupported check)."""
+    check = rule.get("check")
+    col = rule.get("column")
+    try:
+        if check == "not_null" and col and col in df.columns:
+            return int(df[col].isna().sum())
+        if check == "regex_match" and col and col in df.columns:
+            pattern = rule.get("pattern", "")
+            return int((~df[col].astype(str).str.match(pattern, na=False)).sum())
+        if check == "unique" and col and col in df.columns:
+            return int(df[col].duplicated(keep=False).sum())
+        if check == "value_in_set" and col and col in df.columns:
+            values = rule.get("values", [])
+            return int((~df[col].astype(str).isin([str(v) for v in values])).sum())
+        if check == "range" and col and col in df.columns:
+            s = pd.to_numeric(df[col], errors="coerce")
+            min_v = rule.get("min")
+            max_v = rule.get("max")
+            mask = pd.Series([False] * len(df), index=df.index)
+            if min_v is not None:
+                mask |= s < min_v
+            if max_v is not None:
+                mask |= s > max_v
+            return int(mask.sum())
+        if check == "cross_column_order":
+            col_a = rule.get("col_a")
+            col_b = rule.get("col_b")
+            if col_a in df.columns and col_b in df.columns:
+                return int((df[col_a] > df[col_b]).sum())
+    except Exception:
+        return None
+    return None
+
+
+def rule_fail_counts(df: pd.DataFrame, rules: list[dict]) -> dict[str, int]:
+    """Per-rule violation counts {rule_id: count} for *df*. Rules that can't be
+    evaluated are omitted. Used to measure how many failures a transform resolves."""
+    out: dict[str, int] = {}
+    for rule in rules:
+        rid = rule.get("id")
+        if rid is None:
+            continue
+        cnt = _rule_fail_count(df, rule)
+        if cnt is not None:
+            out[rid] = cnt
+    return out
+
+
 def _score_df_with_rules(df: pd.DataFrame, rules: list[dict]) -> float:
     """Compute a composite quality score for *df* against *rules* using pandas.
 
@@ -308,44 +358,12 @@ def _score_df_with_rules(df: pd.DataFrame, rules: list[dict]) -> float:
     total = len(df)
 
     for rule in rules:
-        check = rule.get("check")
-        col = rule.get("column")
         cat = rule.get("category", "validity")
         threshold = float(rule.get("threshold", 0.0))
-
-        try:
-            if check == "not_null" and col and col in df.columns:
-                fail_rate = df[col].isna().sum() / total
-            elif check == "regex_match" and col and col in df.columns:
-                pattern = rule.get("pattern", "")
-                fail_rate = (~df[col].astype(str).str.match(pattern, na=False)).sum() / total
-            elif check == "unique" and col and col in df.columns:
-                fail_rate = df[col].duplicated(keep=False).sum() / total
-            elif check == "value_in_set" and col and col in df.columns:
-                values = rule.get("values", [])
-                fail_rate = (~df[col].astype(str).isin([str(v) for v in values])).sum() / total
-            elif check == "range" and col and col in df.columns:
-                s = pd.to_numeric(df[col], errors="coerce")
-                min_v = rule.get("min")
-                max_v = rule.get("max")
-                mask = pd.Series([False] * total, index=df.index)
-                if min_v is not None:
-                    mask |= s < min_v
-                if max_v is not None:
-                    mask |= s > max_v
-                fail_rate = mask.sum() / total
-            elif check == "cross_column_order":
-                col_a = rule.get("col_a")
-                col_b = rule.get("col_b")
-                if col_a in df.columns and col_b in df.columns:
-                    fail_rate = (df[col_a] > df[col_b]).sum() / total
-                else:
-                    continue
-            else:
-                continue
-        except Exception:
+        fail_count = _rule_fail_count(df, rule)
+        if fail_count is None:
             continue
-
+        fail_rate = fail_count / total if total else 0.0
         passed = 1 if fail_rate <= threshold else 0
         if cat in category_results:
             category_results[cat].append(passed)
@@ -575,12 +593,19 @@ def preview(
 
     projected_score: float | None = None
     projected_score_delta: float | None = None
+    rule_fail_counts_before: dict[str, int] | None = None
+    rule_fail_counts_after: dict[str, int] | None = None
 
     if approved_rules:
         # Baseline score on original df
         baseline = _score_df_with_rules(df, approved_rules)
         projected_score = _score_df_with_rules(new_df, approved_rules)
         projected_score_delta = projected_score - baseline
+        # Per-rule violation counts so callers can measure how many failures this
+        # transform actually resolves (a far more meaningful per-step metric than
+        # the composite-score delta, which dilutes a single fix across all rules).
+        rule_fail_counts_before = rule_fail_counts(df, approved_rules)
+        rule_fail_counts_after = rule_fail_counts(new_df, approved_rules)
 
     return {
         "before_sample": before_sample,
@@ -588,6 +613,8 @@ def preview(
         "affected_row_count": affected,
         "projected_score": projected_score,
         "projected_score_delta": projected_score_delta,
+        "rule_fail_counts_before": rule_fail_counts_before,
+        "rule_fail_counts_after": rule_fail_counts_after,
     }
 
 
@@ -642,6 +669,11 @@ def apply_transformation(session_id: str, transformation_spec: dict) -> dict:
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "status": "applied",
     }
+    # Persist custom code so generated artifacts (dbt/airflow/python/notebook)
+    # embed the real transform logic instead of an empty stub.
+    custom_code = transformation_spec.get("custom_code")
+    if custom_code:
+        log_entry["custom_code"] = custom_code
     log.append(log_entry)
     log_path = _log_path(session_id)
     log_path.parent.mkdir(parents=True, exist_ok=True)

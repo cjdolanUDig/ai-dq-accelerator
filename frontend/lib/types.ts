@@ -61,6 +61,8 @@ export interface TransformationLogEntry {
   params: Record<string, unknown>
   affected_rows: number
   score_delta: number
+  projected_resolution?: number
+  actual_resolution?: number
   status: 'applied' | 'rejected' | 'no_effect'
   custom_code?: string
   rationale?: string
@@ -114,6 +116,10 @@ export interface TransformPlanStep {
   depends_on: string[]
   conflicts_with: string[]
   projected_score_delta: number
+  // Fraction (0..1) of outstanding failures this step is expected to / did
+  // resolve — the meaningful per-step metric shown to the user.
+  projected_resolution?: number
+  actual_resolution?: number
   needs_review: boolean
   status: 'pending' | 'applied' | 'skipped' | 'failed'
   actual_score_delta?: number

@@ -116,3 +116,25 @@ def test_at_most_3_failing_and_2_passing_rows(sample_df, email_rule):
     assert len(good) <= 2
     # Must have selected some failing rows (not degenerate fallback)
     assert len(bad) >= 1
+
+
+# ── rule_fail_counts (per-rule violation counts for the resolution metric) ────
+from dq_tools.transformation_executor import rule_fail_counts  # noqa: E402
+
+
+def test_rule_fail_counts_counts_violations(sample_df, email_rule):
+    age_rule = {"id": "r2", "category": "validity", "column": "age",
+                "check": "range", "min": 0, "max": 120, "threshold": 0.0}
+    counts = rule_fail_counts(sample_df, [email_rule, age_rule])
+    assert counts["r1"] == 2   # "bad-email", "INVALID"
+    assert counts["r2"] == 1   # age == -1
+
+
+def test_rule_fail_counts_drops_unevaluable_rules(sample_df):
+    missing = {"id": "rX", "check": "not_null", "column": "nope", "threshold": 0.0}
+    assert rule_fail_counts(sample_df, [missing]) == {}
+
+
+def test_rule_fail_counts_zero_when_clean(sample_df):
+    rule = {"id": "r3", "check": "not_null", "column": "name", "threshold": 0.0}
+    assert rule_fail_counts(sample_df, [rule]) == {"r3": 0}

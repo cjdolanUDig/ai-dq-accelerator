@@ -85,6 +85,37 @@ def _strip_log_failing_rows(transformation_log: list) -> list:
     return out
 
 
+# ── Per-step "resolution" metric ──────────────────────────────────────────────
+# The composite quality score dilutes a single fix across all rules, so a real,
+# useful per-step transform shows a near-0% score delta. Instead we report the
+# fraction of OUTSTANDING failures a step resolves: (failures_before - failures_
+# after) / failures_before. Meaningful and non-zero for both prebuilt and custom.
+
+def _total_failures(per_rule: list[dict]) -> int:
+    return sum(int(r.get("failure_count", 0) or 0) for r in per_rule)
+
+
+def _failures_for_rules(per_rule: list[dict], rule_ids) -> int:
+    ids = set(rule_ids or [])
+    return sum(int(r.get("failure_count", 0) or 0) for r in per_rule if r.get("id") in ids)
+
+
+def _resolution_from_counts(before_total: int, after_total: int) -> float:
+    if before_total <= 0:
+        return 0.0
+    return max(0.0, min(1.0, (before_total - after_total) / before_total))
+
+
+def _preview_resolution(preview: dict) -> float | None:
+    """Fraction of all outstanding failures a previewed transform resolves, from
+    the preview's per-rule fail counts. None when counts are unavailable."""
+    before = preview.get("rule_fail_counts_before")
+    if not before:
+        return None
+    after = preview.get("rule_fail_counts_after") or {}
+    return _resolution_from_counts(sum(before.values()), sum(after.values()))
+
+
 @workflow.defn
 class DQAcceleratorWorkflow:
     """Main DQ Accelerator workflow with human-in-the-loop signals."""
@@ -521,10 +552,11 @@ class DQAcceleratorWorkflow:
         # ── Stage: TRIAGING ────────────────────────────────────────────────
         self.stage = "TRIAGING"
 
-        # Only triage if there are failing rules to classify
-        failing_rules = [
-            r for r in self.validation_results.get("per_rule", []) if not r.get("passed", True)
-        ]
+        # Only triage if there are failing rules to classify. Pass passing rules
+        # too so triage can flag fixes that would break a currently-passing rule.
+        _per_rule = self.validation_results.get("per_rule", [])
+        failing_rules = [r for r in _per_rule if not r.get("passed", True)]
+        passing_rules = [r for r in _per_rule if r.get("passed", True)]
 
         if failing_rules:
             triage_result = await workflow.execute_activity(
@@ -532,6 +564,7 @@ class DQAcceleratorWorkflow:
                 {
                     "session_id": self.session_id,
                     "failing_rules": failing_rules,
+                    "passing_rules": passing_rules,
                     "use_case": self.use_case,
                 },
                 start_to_close_timeout=AI_ACTIVITY_TIMEOUT,
@@ -615,10 +648,28 @@ class DQAcceleratorWorkflow:
         )
         self.transform_plan = plan_result
 
-        # Replace Claude's estimated projected_score_delta with formula-based values
+        # Ground each step's projected numbers. `projected_resolution` (the share
+        # of outstanding failures the step is expected to resolve) is the metric
+        # surfaced to the user — meaningful per step, unlike the composite-score
+        # delta which dilutes a single fix to ~0%. `projected_score_delta` (the
+        # composite delta) is kept for the projected-final-score roll-up, clamped
+        # so a custom step's optimistic estimate can't read as +100%.
+        _baseline_per_rule = self.validation_results.get("per_rule", [])
+        _total_fail = _total_failures(_baseline_per_rule)
+        _headroom = max(0.0, 1.0 - self.baseline_quality_score)
         for step in plan_result.get("steps", []):
             if step.get("type") == "custom":
-                continue  # custom steps have no code yet — keep Claude's estimate
+                # No code yet — can't preview. Estimate resolution as the share of
+                # outstanding failures this step's targeted rules represent (assumes
+                # the step fixes its targets), and clamp the composite estimate.
+                targeted = _failures_for_rules(_baseline_per_rule, step.get("targets_rules"))
+                step["projected_resolution"] = (
+                    round(targeted / _total_fail, 4) if _total_fail else 0.0
+                )
+                est = step.get("projected_score_delta")
+                if isinstance(est, (int, float)):
+                    step["projected_score_delta"] = max(0.0, min(float(est), _headroom))
+                continue
             try:
                 spec = {
                     **(step.get("params") or {}),
@@ -638,6 +689,9 @@ class DQAcceleratorWorkflow:
                 formula_delta = preview.get("projected_score_delta")
                 if formula_delta is not None:
                     step["projected_score_delta"] = formula_delta
+                resolution = _preview_resolution(preview)
+                if resolution is not None:
+                    step["projected_resolution"] = round(resolution, 4)
             except Exception:
                 pass  # keep Claude's estimate if preview fails
 
@@ -686,6 +740,8 @@ class DQAcceleratorWorkflow:
                 r["id"] for r in self.validation_results.get("per_rule", []) if r.get("passed")
             }
             pre_step_score = self.current_score
+            pre_step_total_failures = _total_failures(self.validation_results.get("per_rule", []))
+            step_projected_resolution: float | None = None  # from execution preview
 
             # 3. Custom step: generate code
             prior_context: str = ""  # defined here so post-apply escalation can reference it
@@ -806,6 +862,9 @@ class DQAcceleratorWorkflow:
                 steps[i]["before_sample"] = step_preview.get("before_sample", [])
                 steps[i]["after_sample"] = step_preview.get("after_sample", [])
                 steps[i]["affected_row_count"] = step_preview.get("affected_row_count", 0)
+                # Real, post-codegen projection of how many failures this step
+                # should resolve — used for the divergence check and display below.
+                step_projected_resolution = _preview_resolution(step_preview)
             except Exception:
                 pass  # non-fatal — missing preview is fine
 
@@ -895,6 +954,16 @@ class DQAcceleratorWorkflow:
                 "baseline_quality_score": self.baseline_quality_score,
             })
 
+            # Actual share of outstanding failures this step resolved. This is the
+            # per-step metric surfaced to the user and drives the divergence check.
+            post_step_total_failures = _total_failures(new_per_rule)
+            actual_resolution = _resolution_from_counts(
+                pre_step_total_failures, post_step_total_failures
+            )
+            steps[i]["actual_resolution"] = round(actual_resolution, 4)
+            if step_projected_resolution is not None:
+                steps[i]["projected_resolution"] = round(step_projected_resolution, 4)
+
             # 6. Detect regressions (only rules NOT in targets_rules that newly failed)
             targets = set(step.get("targets_rules", []))
             {r["id"] for r in new_per_rule if r.get("passed")}
@@ -916,8 +985,11 @@ class DQAcceleratorWorkflow:
                 for r in regressions_raw
             ]
 
-            # 7. Monitoring checks
-            projected = step.get("projected_score_delta", 0.0)
+            # 7. Monitoring checks. Compare against the REAL execution-time preview
+            # (same resolution metric, measured on the actual data) rather than the
+            # plan-time estimate — so a step only escalates when it genuinely under-
+            # delivers vs. what its own preview projected, not because of an
+            # optimistic plan guess.
             escalation_type = None
             escalation_desc = ""
             escalation_context: dict = {}
@@ -928,10 +1000,17 @@ class DQAcceleratorWorkflow:
                     f"Step {step['id']} caused {len(regressions)} unexpected regression(s)"
                 )
                 escalation_context = {"regressed_rule_ids": [r["rule_id"] for r in regressions]}
-            elif projected > 0.02 and actual_score_delta < projected * 0.3:
+            elif (
+                step_projected_resolution is not None
+                and step_projected_resolution > 0.1
+                and actual_resolution < step_projected_resolution * 0.3
+            ):
                 escalation_type = "divergence"
-                escalation_desc = f"Step {step['id']} produced much less improvement than expected"
-                escalation_context = {"projected": projected, "actual": actual_score_delta}
+                escalation_desc = f"Step {step['id']} resolved far fewer failures than its preview projected"
+                escalation_context = {
+                    "projected_resolution": round(step_projected_resolution, 4),
+                    "actual_resolution": round(actual_resolution, 4),
+                }
 
             # 7b. Agent verification (only when no numeric escalation detected)
             if (
@@ -1064,6 +1143,12 @@ class DQAcceleratorWorkflow:
                     "params": step.get("params", {}),
                     "affected_rows": affected_rows,
                     "score_delta": actual_score_delta,
+                    "actual_resolution": round(actual_resolution, 4),
+                    "projected_resolution": (
+                        round(step_projected_resolution, 4)
+                        if step_projected_resolution is not None
+                        else step.get("projected_resolution")
+                    ),
                     "status": "applied" if affected_rows > 0 else "no_effect",
                     "custom_code": steps[i].get("custom_code"),
                     "rationale": step.get("rationale", ""),

@@ -154,20 +154,21 @@ function StepCard({
             depends on: {step.depends_on.join(', ')}
           </span>
         )}
-        <Chip
-          variant="score"
-          tone={
-            step.projected_score_delta > 0
-              ? 'success'
-              : step.projected_score_delta < 0
-                ? 'danger'
-                : 'warning'
-          }
-          className="ml-auto"
-        >
-          {step.projected_score_delta >= 0 ? '+' : ''}
-          {(step.projected_score_delta * 100).toFixed(1)}%
-        </Chip>
+        {(() => {
+          // Show the share of outstanding failures this step is expected to
+          // resolve — meaningful per step, unlike the composite-score delta.
+          const resolution = step.projected_resolution ?? step.projected_score_delta
+          return (
+            <Chip
+              variant="score"
+              tone={resolution > 0 ? 'success' : 'warning'}
+              className="ml-auto"
+              title="Expected share of outstanding failures this step resolves"
+            >
+              ~{(Math.max(0, resolution) * 100).toFixed(0)}% of failures
+            </Chip>
+          )
+        })()}
       </div>
 
       {missingDeps.length > 0 && (

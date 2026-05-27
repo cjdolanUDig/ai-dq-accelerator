@@ -168,8 +168,9 @@ export function AIPanel({ events, isStreaming, waitingMessage, viewingStage }: P
         className="absolute top-0 bottom-0 left-0 w-1.5 -translate-x-1/2 cursor-col-resize hover:bg-brand-primary/30 transition-colors z-10"
       />
 
-      {/* Header */}
-      <div className="px-3.5 h-12 flex items-center shrink-0 border-b border-border gap-2">
+      {/* Header — wraps the control groups onto a new line when the panel is
+          narrow rather than clipping the labels. */}
+      <div className="px-3.5 min-h-12 py-1.5 flex flex-wrap items-center shrink-0 border-b border-border gap-x-2 gap-y-1.5">
         <button
           type="button"
           onClick={() => setCollapsed(true)}
@@ -179,17 +180,17 @@ export function AIPanel({ events, isStreaming, waitingMessage, viewingStage }: P
           <PanelRightClose size={16} strokeWidth={2} />
         </button>
         <span className={['w-2 h-2 rounded-full shrink-0', statusClass].join(' ')} />
-        <span className="text-[12px] leading-[14px] font-semibold text-fg">AI Activity</span>
-        <div className="flex-1" />
+        <span className="text-[12px] leading-[14px] font-semibold text-fg whitespace-nowrap">AI Activity</span>
+        <div className="flex-1 min-w-2" />
         {/* Scope toggle */}
-        <div className="h-7 flex items-center bg-elevated rounded-md p-0.5 gap-0.5">
+        <div className="h-7 flex items-center bg-elevated rounded-md p-0.5 gap-0.5 shrink-0">
           {(['stage', 'all'] as const).map((s) => (
             <button
               key={s}
               type="button"
               onClick={() => setScope(s)}
               className={[
-                'text-xs px-2.5 py-1 rounded-md capitalize transition-colors',
+                'text-xs px-2.5 py-1 rounded-md capitalize transition-colors whitespace-nowrap',
                 scope === s ? 'bg-surface text-fg border border-border' : 'text-fg-muted hover:text-fg',
               ].join(' ')}
             >
@@ -198,7 +199,7 @@ export function AIPanel({ events, isStreaming, waitingMessage, viewingStage }: P
           ))}
         </div>
         {/* Segmented control */}
-        <div className="h-7 flex items-center bg-elevated rounded-md p-0.5 gap-0.5">
+        <div className="h-7 flex items-center bg-elevated rounded-md p-0.5 gap-0.5 shrink-0">
           {(['feed', 'terminal'] as const).map((v) => (
             <button
               key={v}

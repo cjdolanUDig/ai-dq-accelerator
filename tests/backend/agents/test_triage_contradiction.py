@@ -1,6 +1,5 @@
 """Tests for _detect_triage_contradictions."""
 import json
-import pytest
 from unittest.mock import MagicMock, patch
 
 
@@ -91,6 +90,37 @@ def test_returns_empty_on_llm_failure(mock_call):
     result = _detect_triage_contradictions(client, "test-session", classifications, failing_rules, "ML")
 
     assert result == []
+
+
+@patch("backend.agents.graphs.triage_agent.call_claude_with_retry")
+def test_passing_rules_are_included_in_prompt(mock_call):
+    """Currently-passing rules must be sent to the LLM so it can flag fixes that
+    would break them — including the rule id, but not bulky sample rows."""
+    from backend.agents.graphs.triage_agent import _detect_triage_contradictions
+
+    mock_call.return_value = _mock_llm_response([])
+    classifications = [
+        {"rule_id": "r1", "classification": "transform_fixable", "check": "null_invalid", "column": "email"},
+        {"rule_id": "r2", "classification": "transform_fixable", "check": "value_in_set", "column": "status"},
+    ]
+    failing_rules = [
+        {"id": "r1", "check": "null_invalid", "column": "email", "threshold": 0.0},
+        {"id": "r2", "check": "value_in_set", "column": "status", "threshold": 0.0},
+    ]
+    passing_rules = [
+        {"id": "r7", "check": "not_null", "column": "email", "passed": True,
+         "failure_rate": 0.0, "sample_failing_rows": [{"email": None}]},
+    ]
+
+    _detect_triage_contradictions(
+        MagicMock(), "test-session", classifications, failing_rules, "ML",
+        passing_rules=passing_rules,
+    )
+
+    sent = mock_call.call_args.kwargs["messages"][0]["content"]
+    assert "PASSING" in sent
+    assert "r7" in sent  # the passing rule is visible to the model
+    assert "sample_failing_rows" not in sent  # slimmed — no bulky rows
 
 
 def test_skipped_with_single_rule():
