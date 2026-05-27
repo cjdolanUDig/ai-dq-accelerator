@@ -156,7 +156,7 @@ def _plan_transforms_sync(params: dict) -> dict:
 @activity.defn
 async def generate_custom_code_activity(params: dict) -> dict:
     """
-    params: {session_id, step, prior_context, human_instruction}
+    params: {session_id, step, prior_context, human_instruction, failure_context}
     Returns: {custom_code: str | None, validation_passed: bool}
     """
     loop = asyncio.get_event_loop()
@@ -168,6 +168,7 @@ def _generate_custom_code_sync(params: dict) -> dict:
         step=params["step"],
         prior_context=params.get("prior_context", ""),
         human_instruction=params.get("human_instruction"),
+        failure_context=params.get("failure_context"),
     )
 
 

@@ -1,7 +1,6 @@
 """CustomCodeGenerator — generates and validates Python transform code for custom steps."""
 from __future__ import annotations
 import builtins
-import json
 import re
 import numpy as np
 import pandas as pd
@@ -121,6 +120,7 @@ def run_custom_code_generator(
     step: dict,
     prior_context: str,
     human_instruction: str | None,
+    failure_context: str | None = None,
 ) -> dict:
     """Generate and validate a Python transform function for a custom step.
 
@@ -151,11 +151,16 @@ def run_custom_code_generator(
             # First attempt: generate from investigation context
             prior_str = f"\nPrior execution context: {prior_context}" if prior_context else ""
             instruction_str = f"\n\nEngineer instruction: {human_instruction}" if human_instruction else ""
+            failure_str = (
+                f"\n\nA previous transform for this step FAILED. Reason: {failure_context}\n"
+                "Write custom code that achieves the step's intent and avoids that failure."
+                if failure_context else ""
+            )
             generate_prompt = (
                 f"Step intent: {step.get('intent', '')}\n"
                 f"Target columns: {step.get('target_columns', [])}\n"
                 f"Approach: {step.get('approach', '')}"
-                f"{prior_str}{instruction_str}\n\n"
+                f"{prior_str}{instruction_str}{failure_str}\n\n"
                 "Write the Python transform function. Output ONLY the function in a ```python block."
             )
             messages = investigation_messages + [{"role": "user", "content": generate_prompt}]
