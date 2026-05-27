@@ -62,6 +62,29 @@ def _cap_failing_rows(validation_results: dict, limit: int = MAX_FAILING_ROWS) -
     }
 
 
+def _strip_log_failing_rows(transformation_log: list) -> list:
+    """Blank sample_failing_rows in every log entry's post_step_per_rule.
+
+    Only the latest step's failing rows are ever shown (the scorecard's "still
+    failing" set, via latest_post_step_per_rule). Called before appending a new
+    rows-bearing entry so only the most recent step carries failing rows.
+    Otherwise the log accumulates ~20 rows × 36 rules × N steps and blows past
+    Temporal's 2MB payload limit in the 2s-polled get_full_state query."""
+    out = []
+    for entry in transformation_log:
+        psr = entry.get("post_step_per_rule")
+        if psr:
+            entry = {
+                **entry,
+                "post_step_per_rule": [
+                    {**r, "sample_failing_rows": []} if r.get("sample_failing_rows") else r
+                    for r in psr
+                ],
+            }
+        out.append(entry)
+    return out
+
+
 @workflow.defn
 class DQAcceleratorWorkflow:
     """Main DQ Accelerator workflow with human-in-the-loop signals."""
@@ -1030,6 +1053,10 @@ class DQAcceleratorWorkflow:
                 {**r, "sample_failing_rows": list(r.get("sample_failing_rows") or [])[:20]}
                 for r in new_per_rule
             ]
+            # Keep failing-row samples only on this (latest) step — strip prior
+            # entries so the polled get_full_state query and transform snapshot
+            # stay well under Temporal's 2MB payload limit.
+            self.transformation_log = _strip_log_failing_rows(self.transformation_log)
             self.transformation_log.append(
                 {
                     "id": step["id"],
