@@ -52,10 +52,15 @@ the full passport already held in state. Other agents (validation, scorecard)
 already return prose in full and need no change.
 
 ### Notes / risks
-- Emitting fuller payloads increases SSE message size. Mitigation: cap result
-  payloads by element count (e.g. first N rows / first N keys with full values)
-  rather than streaming arbitrarily large results. Confirm payloads stay
-  reasonable for the largest tools (e.g. `get_sample_rows`).
+- The `dq_tools` functions already bound their own output at the source
+  (`get_sample_rows` → `LIMIT 50`, `get_value_counts` → `top_n`, profile stats are
+  summaries, `sample_failing_rows` → `LIMIT 50`). The 80-char emit truncation is a
+  redundant, lossy second cap on already-bounded data.
+- **Decision:** pass the tool's full (already-bounded) result through as-is, with a
+  single generous **safety backstop** (e.g. ≤ ~50 rows / a few hundred KB per
+  event) so a pathological or future tool can't bloat the SSE stream / JSONL log.
+  The backstop does not trip for any current tool, so the user-visible result is
+  effectively full and untruncated. Not "entirely uncapped" — the backstop stays.
 
 ---
 
