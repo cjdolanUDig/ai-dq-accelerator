@@ -3,6 +3,7 @@ import { Check, X, Pencil } from 'lucide-react'
 import type { Rule } from '@/lib/types'
 import { DimensionChip } from '@/components/dq/DimensionChip'
 import { RuleInlineEditor } from './RuleInlineEditor'
+import { ruleTitle } from '@/lib/ruleTitle'
 
 export type Decision = 'approved' | 'denied' | 'pending'
 
@@ -117,7 +118,9 @@ export function RuleCard({
           />
         )}
         <DimensionChip dimension={rule.category} className="shrink-0" />
-        <span className="font-mono text-[13px] text-fg flex-1 break-words">{edit.check ?? rule.check}</span>
+        <span className="text-[13px] font-medium text-fg flex-1 break-words">
+          {ruleTitle({ ...rule, check: edit.check ?? rule.check })}
+        </span>
         {!isSelectionMode && (
           <div className="flex gap-2 shrink-0">
             {decisionButton({ active: decision === 'approved', variant: 'success', label: decision === 'approved' ? 'Approved' : 'Approve', Icon: Check, onClick: onApprove })}

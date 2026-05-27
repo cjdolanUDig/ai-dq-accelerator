@@ -88,3 +88,31 @@ describe('RuleCard', () => {
     expect(screen.getByText('Save & Approve')).toBeInTheDocument()
   })
 })
+
+const baseRule: Rule = {
+  id: 'r1', category: 'completeness', column: 'email', check: 'not_null',
+  threshold: 1, modified: false,
+}
+const noop = () => {}
+
+function renderCard(rule: Rule) {
+  return render(
+    <RuleCard
+      rule={rule} decision="pending" edit={{}} isEditing={false}
+      isSelectionMode={false} isSelected={false}
+      onDecide={noop} onToggleSelect={noop} onEditOpen={noop}
+      onEditClose={noop} onEditChange={noop} onSaveAndApprove={noop}
+    />,
+  )
+}
+
+describe('RuleCard title', () => {
+  it('shows the human-readable rule title as the primary label', () => {
+    renderCard(baseRule)
+    expect(screen.getByText('Email must not be empty')).toBeInTheDocument()
+  })
+  it('keeps the raw check value visible as secondary detail', () => {
+    renderCard(baseRule)
+    expect(screen.getByText('check: not_null')).toBeInTheDocument()
+  })
+})

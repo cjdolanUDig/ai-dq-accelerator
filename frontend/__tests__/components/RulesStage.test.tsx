@@ -11,7 +11,8 @@ const session = { session_id: 's1', stage: 'AWAITING_RULE_APPROVAL', suggested_r
 
 it('renders rule check text', () => {
   render(<RulesStage session={session} />)
-  expect(screen.getByText('not_null')).toBeInTheDocument()
+  // Primary label shows human-readable title; secondary detail still shows raw check
+  expect(screen.getByText('check: not_null')).toBeInTheDocument()
 })
 
 it('submit button is disabled when rules are undecided', () => {
