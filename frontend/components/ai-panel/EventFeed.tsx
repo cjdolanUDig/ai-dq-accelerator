@@ -5,6 +5,8 @@ import type { AIEvent } from '@/hooks/useAIStream'
 import { useStickToBottom } from '@/hooks/useStickToBottom'
 import { ScrollToLatestPill } from './ScrollToLatestPill'
 import { Chip } from '@/components/ui/Chip'
+import { ToolInputView } from './_feed/ToolInputView'
+import { ResultView } from './_feed/ResultView'
 
 function formatTimestamp(ts: string | number): string {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -16,19 +18,10 @@ interface CardProps {
 }
 
 const cardBase = 'bg-surface rounded-lg p-3 flex flex-col gap-1.5 border min-w-0 overflow-hidden shrink-0'
-const bodyClass = 'text-xs font-mono text-fg-muted leading-relaxed whitespace-pre-wrap break-all'
 const toolNameClass = 'text-xs font-mono text-fg truncate min-w-0'
 const timestampClass = 'text-xs text-fg-muted ml-auto shrink-0 tabular-nums'
 
 function ToolCallCard({ event: ev, highlighted }: CardProps) {
-  const body = JSON.stringify(
-    (ev.input as object) ?? (ev.params as object) ?? {},
-    null,
-    0,
-  )
-    .replace(/^{|}$/g, '')
-    .trim()
-
   return (
     <div className={[cardBase, highlighted ? 'border-accent-indigo ring-1 ring-accent-indigo/40' : 'border-border'].join(' ')}>
       <div className="flex items-center gap-2">
@@ -36,13 +29,12 @@ function ToolCallCard({ event: ev, highlighted }: CardProps) {
         {ev.tool != null && <span className={toolNameClass}>{String(ev.tool)}</span>}
         {ev.ts != null && <span className={timestampClass}>{formatTimestamp(ev.ts)}</span>}
       </div>
-      {body && <pre className={bodyClass}>{body}</pre>}
+      <ToolInputView input={(ev.input as object) ?? (ev.params as object)} />
     </div>
   )
 }
 
 function ResultCard({ event: ev, highlighted }: CardProps) {
-  const preview = 'preview' in ev ? String(ev.preview) : ''
   return (
     <div className={[cardBase, highlighted ? 'border-success ring-1 ring-success/40' : 'border-border'].join(' ')}>
       <div className="flex items-center gap-2">
@@ -50,7 +42,7 @@ function ResultCard({ event: ev, highlighted }: CardProps) {
         {ev.tool != null && <span className={toolNameClass}>{String(ev.tool)}</span>}
         {ev.ts != null && <span className={timestampClass}>{formatTimestamp(ev.ts)}</span>}
       </div>
-      {preview && <pre className={bodyClass}>{preview}</pre>}
+      <ResultView event={ev} />
     </div>
   )
 }
