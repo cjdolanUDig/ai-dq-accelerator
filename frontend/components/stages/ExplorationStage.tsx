@@ -195,7 +195,7 @@ export function ExplorationStage({ sessionId, stage, readOnly, mockState }: Prop
           </span>
         </div>
       ) : (
-        <div className="border border-border rounded-xl overflow-hidden h-[520px] flex flex-col">
+        <div className="border border-border rounded-xl overflow-hidden h-[min(80vh,900px)] flex flex-col">
           <div className="flex items-center bg-elevated px-3 py-2 border-b border-border">
             <span className="text-xs font-semibold uppercase tracking-wider text-fg-muted">
               Exploration Notebook
