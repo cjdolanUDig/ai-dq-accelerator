@@ -22,7 +22,26 @@ from langgraph.errors import GraphRecursionError
 from langgraph.prebuilt import ToolRuntime
 
 from backend.agents.emit import _find_project_root
-from backend.agents.emit import emit as _emit
+from backend.agents.emit import emit as _emit_raw, cap_result
+import json as _json
+
+
+_STAGE = "explore"
+
+
+def _emit(session_id: str, event: str, **kw) -> None:
+    _emit_raw(session_id, event, stage=_STAGE, **kw)
+
+
+def _result_payload(content):
+    """Best-effort: parse JSON tool content into structured data, else return the
+    raw string. Always capped for streaming."""
+    if isinstance(content, str):
+        try:
+            return cap_result(_json.loads(content))
+        except (ValueError, TypeError):
+            return cap_result(content)
+    return cap_result(content)
 from backend.agents.prompts import PROFILE_INVESTIGATION_SYSTEM
 from backend.agents.state import ProfileAnalyzerState
 import dq_tools.explorer as _explorer
@@ -419,11 +438,13 @@ After all columns, emit cross-column blocks, then the ===EXPLORATION_SUMMARY_STA
                     for tc in getattr(msg, "tool_calls", []):
                         _emit(session_id, "tool_call", tool=tc["name"], input=tc.get("args", {}))
                 elif isinstance(msg, ToolMessage):
+                    content = getattr(msg, "content", "")
                     _emit(
                         session_id,
                         "tool_result",
                         tool=getattr(msg, "name", "unknown"),
-                        preview=str(msg.content)[:80],
+                        preview=str(content)[:80],
+                        result=_result_payload(content),
                     )
             seen = len(messages)
     except GraphRecursionError:

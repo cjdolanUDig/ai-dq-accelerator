@@ -13,7 +13,14 @@ import logging
 import re
 from pathlib import Path
 
-from backend.agents.emit import emit as _emit, _find_project_root
+from backend.agents.emit import emit as _emit_raw, _find_project_root, cap_result
+
+
+_STAGE = "profile"
+
+
+def _emit(session_id: str, event: str, **kw) -> None:
+    _emit_raw(session_id, event, stage=_STAGE, **kw)
 from backend.agents.retry import call_claude_with_retry
 from langgraph.graph import END, StateGraph
 from backend.agents.prompts import (
@@ -315,7 +322,7 @@ Your findings feed directly into the data passport and rule proposals.""",
             else:
                 preview = result_str[:80]
 
-            _emit(session_id, "tool_result", tool=block.name, preview=preview)
+            _emit(session_id, "tool_result", tool=block.name, preview=preview, result=cap_result(result))
 
             tool_results.append(
                 {
