@@ -68,6 +68,48 @@ def _write_df(session_id: str, df: pd.DataFrame) -> None:
             con.close()
 
 
+def _snapshot_table(label: str) -> str:
+    """Return the snapshot table name for a label, rejecting unsafe characters."""
+    if not re.fullmatch(r"[A-Za-z0-9_]+", label or ""):
+        raise ValueError(f"Unsafe snapshot label: {label!r}")
+    return f"working_data__{label}"
+
+
+def snapshot_working(session_id: str, label: str) -> None:
+    """Copy ``working_data`` into a labelled snapshot table for later rollback."""
+    table = _snapshot_table(label)
+    with session_db_lock(session_id):
+        con = duckdb_connect(str(_db_path(session_id)))
+        try:
+            con.execute(f'DROP TABLE IF EXISTS "{table}"')
+            con.execute(f'CREATE TABLE "{table}" AS SELECT * FROM working_data')
+        finally:
+            con.close()
+
+
+def restore_working(session_id: str, label: str) -> None:
+    """Replace ``working_data`` with the contents of a labelled snapshot table."""
+    table = _snapshot_table(label)
+    with session_db_lock(session_id):
+        con = duckdb_connect(str(_db_path(session_id)))
+        try:
+            con.execute("DROP TABLE IF EXISTS working_data")
+            con.execute(f'CREATE TABLE working_data AS SELECT * FROM "{table}"')
+        finally:
+            con.close()
+
+
+def drop_working_snapshot(session_id: str, label: str) -> None:
+    """Delete a labelled snapshot table; no-op if it does not exist."""
+    table = _snapshot_table(label)
+    with session_db_lock(session_id):
+        con = duckdb_connect(str(_db_path(session_id)))
+        try:
+            con.execute(f'DROP TABLE IF EXISTS "{table}"')
+        finally:
+            con.close()
+
+
 def _apply_transform(df: pd.DataFrame, spec: dict) -> tuple[pd.DataFrame, int]:
     """Apply a single transformation spec to *df* and return (new_df, affected_row_count).
 
