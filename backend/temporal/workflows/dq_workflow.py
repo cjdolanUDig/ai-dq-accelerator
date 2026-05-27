@@ -26,9 +26,9 @@ with workflow.unsafe.imports_passed_through():
         plan_transforms_activity,
         generate_custom_code_activity,
         verify_transform_activity,
-        snapshot_working_activity,  # noqa: F401  — wired into the loop in a later task
+        snapshot_working_activity,
         restore_working_activity,
-        drop_working_snapshot_activity,  # noqa: F401  — wired into the loop in a later task
+        drop_working_snapshot_activity,
     )
     from backend.temporal.activities.pipeline_activities import (
         generate_pipeline_activity,
@@ -355,6 +355,7 @@ class DQAcceleratorWorkflow:
             "approach": (
                 f"Original transform was type '{step.get('type')}' with params {params}. "
                 f"Reproduce its intent in pandas."
+                f" Prior failure: {failure_reason}"
             ),
             "targets_rules": step.get("targets_rules", []),
         }
@@ -470,6 +471,7 @@ class DQAcceleratorWorkflow:
                     "actual_resolution": resolution,
                     "regressions": regressions,
                     "new_per_rule": new_per_rule,
+                    "affected_rows": apply_result.get("affected_rows", 0),
                 }
 
         await workflow.execute_activity(
@@ -863,7 +865,16 @@ class DQAcceleratorWorkflow:
 
         steps = self.transform_plan.get("steps", []) if self.transform_plan else []
 
+        prev_snapshot_label: str | None = None
         for i, step in enumerate(steps):
+            if prev_snapshot_label:
+                await workflow.execute_activity(
+                    drop_working_snapshot_activity,
+                    {"session_id": self.session_id, "label": prev_snapshot_label},
+                    start_to_close_timeout=ACTIVITY_TIMEOUT,
+                    retry_policy=ACTIVITY_RETRY,
+                )
+                prev_snapshot_label = None
             # 1. Dependency check
             dep_statuses = {s["id"]: s.get("status", "pending") for s in steps}
             failed_deps = [
@@ -1019,6 +1030,17 @@ class DQAcceleratorWorkflow:
                 step_projected_resolution = _preview_resolution(step_preview)
             except Exception:
                 pass  # non-fatal — missing preview is fine
+
+            # Snapshot pre-apply state so a failed transform can be rolled back
+            # and auto-repaired. Cleaned up at the top of the next iteration / after the loop.
+            snapshot_label = f"pre_step_{i}"
+            await workflow.execute_activity(
+                snapshot_working_activity,
+                {"session_id": self.session_id, "label": snapshot_label},
+                start_to_close_timeout=ACTIVITY_TIMEOUT,
+                retry_policy=ACTIVITY_RETRY,
+            )
+            prev_snapshot_label = snapshot_label
 
             apply_result: dict = {}
             try:
@@ -1200,113 +1222,175 @@ class DQAcceleratorWorkflow:
                 except Exception:
                     pass  # non-fatal — skip verification on error
 
-            if escalation_type:
-                resolved = await self._escalate(
-                    step, escalation_type, escalation_desc, escalation_context
-                )
-                if resolved["action"] == "abort_plan":
-                    steps[i]["status"] = "applied"
-                    steps[i]["actual_score_delta"] = actual_score_delta
-                    break
-                elif resolved["action"] == "apply_suggestion":
-                    suggestion = escalation_context.get("agent_suggestion") or resolved.get(
-                        "suggestion"
-                    )
-                    if suggestion and isinstance(suggestion, dict):
-                        corrective = {
-                            **suggestion,
-                            "id": f"{step['id']}_correction",
-                            "status": "pending",
-                            "rationale": f"Agent-suggested correction for {step['id']}",
-                            "targets_rules": step.get("targets_rules", []),
-                            "depends_on": [step["id"]],
-                        }
-                        steps.insert(i + 1, corrective)
-                elif resolved["action"] == "provide_instruction":
-                    _instruction = resolved.get("instruction") or ""
-                    _modified_params = resolved.get("modified_params")
-                    if step.get("type") == "custom" and _instruction:
-                        # Regenerate the custom code with the user's instruction
-                        try:
-                            regen = await workflow.execute_activity(
-                                generate_custom_code_activity,
-                                {
-                                    "session_id": self.session_id,
-                                    "step": step,
-                                    "prior_context": prior_context,
-                                    "human_instruction": _instruction,
-                                },
-                                start_to_close_timeout=AI_ACTIVITY_TIMEOUT,
-                                retry_policy=ACTIVITY_RETRY,
-                            )
-                            corrective = {
-                                **step,
-                                "id": f"{step['id']}_regen",
-                                "status": "pending",
-                                "custom_code": regen.get("custom_code"),
-                                "rationale": _instruction,
-                                "depends_on": [step["id"]],
-                            }
-                            steps.insert(i + 1, corrective)
-                        except Exception:
-                            pass  # leave step as applied, don't crash the plan
-                    elif _modified_params:
-                        # User edited params — insert a corrective step with new params
-                        corrective = {
-                            **_modified_params,
-                            "id": f"{step['id']}_user_edit",
-                            "type": step.get("type", ""),
-                            "status": "pending",
-                            "rationale": _instruction or f"User-edited correction for {step['id']}",
-                            "targets_rules": step.get("targets_rules", []),
-                            "projected_score_delta": step.get("projected_score_delta", 0.0),
-                        }
-                        steps.insert(i + 1, corrective)
-                    elif _instruction:
-                        # Instruction only for non-custom step — insert same step with instruction
-                        corrective = {
-                            **step,
-                            "id": f"{step['id']}_user_retry",
-                            "status": "pending",
-                            "rationale": _instruction,
-                        }
-                        steps.insert(i + 1, corrective)
+            # 7c. Failure handling with auto-repair. A step is "failed" if it
+            # regressed/diverged/failed verification, had no effect, or lowered the
+            # score. Before escalating to a human, try to achieve the step's intent
+            # with custom code (bounded attempts), rolling back to the pre-step
+            # snapshot between tries.
+            affected_rows = apply_result.get("affected_rows", 0)
+            failed = bool(escalation_type) or affected_rows == 0 or actual_score_delta < 0
+            repaired_from: str | None = None
+            repair_attempts_used = 0
 
-            # 8. Mark applied
+            if failed:
+                if affected_rows == 0:
+                    failure_reason = "Transform had no effect (0 rows affected)."
+                elif actual_score_delta < 0:
+                    failure_reason = (
+                        f"Transform lowered the quality score by {actual_score_delta:+.4f}."
+                    )
+                else:
+                    failure_reason = escalation_desc or "Transform did not achieve its goal."
+
+                repair = await self._attempt_repair(
+                    steps, i, failure_reason,
+                    pre_step_score, pre_step_total_failures, pre_step_passing,
+                    snapshot_label,
+                )
+                repair_attempts_used = repair.get("attempts", 0)
+
+                if repair.get("repaired"):
+                    # Custom code achieved the intent — adopt the repaired result.
+                    repaired_from = step.get("type", "")
+                    steps[i]["custom_code"] = repair.get("custom_code")
+                    actual_score_delta = repair.get("actual_score_delta", actual_score_delta)
+                    actual_resolution = repair.get("actual_resolution", actual_resolution)
+                    regressions = repair.get("regressions", [])
+                    new_per_rule = repair.get("new_per_rule", new_per_rule)
+                    affected_rows = repair.get("affected_rows", affected_rows)
+                    self.validation_results = _cap_failing_rows({
+                        "per_rule": new_per_rule or self.validation_results.get("per_rule", []),
+                        "category_scores": self.validation_results.get("category_scores", {}),
+                        "baseline_quality_score": self.baseline_quality_score,
+                    })
+                    steps[i]["actual_resolution"] = round(actual_resolution, 4)
+                else:
+                    # Repair failed; _attempt_repair restored data+log to the pre-step
+                    # state, so the failed transform is NOT applied. Escalate for human
+                    # visibility, mark the step failed, and log it as failed.
+                    resolved = await self._escalate(
+                        step,
+                        escalation_type or "transform_verification_failed",
+                        escalation_desc or failure_reason,
+                        {
+                            **escalation_context,
+                            "repair_attempts": repair_attempts_used,
+                            "last_repair_code": repair.get("custom_code"),
+                        },
+                    )
+                    steps[i]["status"] = "failed"
+                    self.transformation_log = _strip_log_failing_rows(self.transformation_log)
+                    self.transformation_log.append({
+                        "id": step["id"],
+                        "type": step.get("type", ""),
+                        "params": step.get("params", {}),
+                        "affected_rows": 0,
+                        "score_delta": 0,
+                        "actual_resolution": 0,
+                        "status": "failed",
+                        "custom_code": repair.get("custom_code"),
+                        "rationale": f"Auto-repair failed ({repair_attempts_used} attempts): {failure_reason}",
+                        "regressions": [],
+                        "repair_attempts": repair_attempts_used,
+                        "repaired_from": None,
+                    })
+                    action = resolved.get("action")
+                    if action == "apply_suggestion":
+                        suggestion = escalation_context.get("agent_suggestion") or resolved.get("suggestion")
+                        if suggestion and isinstance(suggestion, dict):
+                            steps.insert(i + 1, {
+                                **suggestion,
+                                "id": f"{step['id']}_correction",
+                                "status": "pending",
+                                "rationale": f"Agent-suggested correction for {step['id']}",
+                                "targets_rules": step.get("targets_rules", []),
+                                "depends_on": [],
+                            })
+                    elif action == "provide_instruction":
+                        _instruction = resolved.get("instruction") or ""
+                        _modified_params = resolved.get("modified_params")
+                        if step.get("type") == "custom" and _instruction:
+                            try:
+                                regen = await workflow.execute_activity(
+                                    generate_custom_code_activity,
+                                    {
+                                        "session_id": self.session_id,
+                                        "step": step,
+                                        "prior_context": prior_context,
+                                        "human_instruction": _instruction,
+                                    },
+                                    start_to_close_timeout=AI_ACTIVITY_TIMEOUT,
+                                    retry_policy=ACTIVITY_RETRY,
+                                )
+                                steps.insert(i + 1, {
+                                    **step,
+                                    "id": f"{step['id']}_regen",
+                                    "status": "pending",
+                                    "custom_code": regen.get("custom_code"),
+                                    "rationale": _instruction,
+                                    "depends_on": [],
+                                })
+                            except Exception:
+                                pass
+                        elif _modified_params:
+                            steps.insert(i + 1, {
+                                **_modified_params,
+                                "id": f"{step['id']}_user_edit",
+                                "type": step.get("type", ""),
+                                "status": "pending",
+                                "rationale": _instruction or f"User-edited correction for {step['id']}",
+                                "targets_rules": step.get("targets_rules", []),
+                                "projected_score_delta": step.get("projected_score_delta", 0.0),
+                            })
+                        elif _instruction:
+                            steps.insert(i + 1, {
+                                **step,
+                                "id": f"{step['id']}_user_retry",
+                                "status": "pending",
+                                "rationale": _instruction,
+                            })
+                    elif action == "abort_plan":
+                        break
+                    # skip_step or any other action: just move on to the next step
+                    continue
+
+            # 8. Mark applied (normal success or successful repair)
             steps[i]["status"] = "applied"
             steps[i]["actual_score_delta"] = actual_score_delta
 
             # 9. Append to log
-            affected_rows = apply_result.get("affected_rows", 0)
-            # Capture per-rule state after this step. Keep a CAPPED sample of
-            # failing rows (≤20) so the scorecard can show what is still failing.
             post_step_per_rule = [
                 {**r, "sample_failing_rows": list(r.get("sample_failing_rows") or [])[:20]}
                 for r in new_per_rule
             ]
-            # Keep failing-row samples only on this (latest) step — strip prior
-            # entries so the polled get_full_state query and transform snapshot
-            # stay well under Temporal's 2MB payload limit.
             self.transformation_log = _strip_log_failing_rows(self.transformation_log)
-            self.transformation_log.append(
-                {
-                    "id": step["id"],
-                    "type": step.get("type", ""),
-                    "params": step.get("params", {}),
-                    "affected_rows": affected_rows,
-                    "score_delta": actual_score_delta,
-                    "actual_resolution": round(actual_resolution, 4),
-                    "projected_resolution": (
-                        round(step_projected_resolution, 4)
-                        if step_projected_resolution is not None
-                        else step.get("projected_resolution")
-                    ),
-                    "status": "applied" if affected_rows > 0 else "no_effect",
-                    "custom_code": steps[i].get("custom_code"),
-                    "rationale": step.get("rationale", ""),
-                    "regressions": regressions,
-                    "post_step_per_rule": post_step_per_rule,
-                }
+            self.transformation_log.append({
+                "id": step["id"],
+                "type": step.get("type", ""),
+                "params": step.get("params", {}),
+                "affected_rows": affected_rows,
+                "score_delta": actual_score_delta,
+                "actual_resolution": round(actual_resolution, 4),
+                "projected_resolution": (
+                    round(step_projected_resolution, 4)
+                    if step_projected_resolution is not None
+                    else step.get("projected_resolution")
+                ),
+                "status": "applied" if affected_rows > 0 else "no_effect",
+                "custom_code": steps[i].get("custom_code"),
+                "rationale": step.get("rationale", ""),
+                "regressions": regressions,
+                "post_step_per_rule": post_step_per_rule,
+                "repair_attempts": repair_attempts_used,
+                "repaired_from": repaired_from,
+            })
+
+        if prev_snapshot_label:
+            await workflow.execute_activity(
+                drop_working_snapshot_activity,
+                {"session_id": self.session_id, "label": prev_snapshot_label},
+                start_to_close_timeout=ACTIVITY_TIMEOUT,
+                retry_policy=ACTIVITY_RETRY,
             )
 
         # Update plan steps with final statuses
