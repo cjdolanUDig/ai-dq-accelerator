@@ -1,6 +1,4 @@
-# tests/backend/temporal/test_plan_activities.py
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from backend.temporal.activities.transform_activities import (
     plan_transforms_activity,
     generate_custom_code_activity,
@@ -34,5 +32,9 @@ async def test_generate_custom_code_activity_calls_generator(mock_gen):
     result = await generate_custom_code_activity(params)
     assert result["validation_passed"] is True
     mock_gen.assert_called_once_with(
-        session_id="s1", step=step, prior_context="", human_instruction=None
+        session_id="s1",
+        step=step,
+        prior_context="",
+        human_instruction=None,
+        failure_context=None,
     )
