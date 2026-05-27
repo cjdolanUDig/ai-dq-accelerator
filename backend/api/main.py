@@ -18,9 +18,22 @@ if _env_path.exists():
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from fastapi.responses import JSONResponse  # noqa: E402
 from temporalio.client import Client  # noqa: E402
 
 from backend.api.routers import sessions, rules, transformations, pipeline, triage, plan_router, exploration  # noqa: E402
+from backend.json_utils import json_safe  # noqa: E402
+
+
+class SafeJSONResponse(JSONResponse):
+    """JSONResponse that strips non-finite floats (NaN/Inf) before encoding.
+
+    Live workflow-query payloads can carry pandas/numpy NaN; the default encoder
+    would emit the bare ``NaN`` token, which the browser's ``JSON.parse`` rejects.
+    """
+
+    def render(self, content) -> bytes:
+        return super().render(json_safe(content))
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +90,7 @@ app = FastAPI(
     description="Guided data quality workflow with Temporal + LangGraph",
     version="0.1.0",
     lifespan=lifespan,
+    default_response_class=SafeJSONResponse,
 )
 
 app.add_middleware(

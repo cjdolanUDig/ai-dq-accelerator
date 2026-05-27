@@ -70,6 +70,32 @@ async def test_delete_session_idempotent(app_sessionmaker):
         assert deleted is False
 
 
+async def test_upsert_snapshot_with_nan_payload_persists_as_null(app_sessionmaker):
+    """Regression: pandas/numpy NaN in a payload must not blow up the JSONB write.
+
+    Previously this raised asyncpg InvalidTextRepresentationError ('Token "NaN"
+    is invalid') because json.dumps emits the bare NaN literal that JSONB rejects.
+    """
+    sid = uuid.uuid4()
+    payload = {
+        "baseline_score": 0.701961,
+        "category_scores": {"completeness": float("nan"), "uniqueness": 0.5},
+        "stats": {"mean": float("inf"), "std": float("-inf")},
+    }
+    async with app_sessionmaker() as s:
+        await insert_session(s, id=sid, filename="a.csv", file_ext="csv")
+        await upsert_snapshot(s, session_id=sid, stage="validate", payload=payload)
+        await s.commit()
+    async with app_sessionmaker() as s:
+        snap = await get_snapshot(s, sid, "validate")
+        assert snap is not None
+        assert snap.payload["baseline_score"] == 0.701961
+        assert snap.payload["category_scores"]["completeness"] is None
+        assert snap.payload["category_scores"]["uniqueness"] == 0.5
+        assert snap.payload["stats"]["mean"] is None
+        assert snap.payload["stats"]["std"] is None
+
+
 async def test_get_snapshot_missing_returns_none(app_sessionmaker):
     async with app_sessionmaker() as s:
         sid = uuid.uuid4()

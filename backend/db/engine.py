@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from backend.json_utils import dumps_safe
+
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
@@ -20,7 +22,13 @@ def dsn_from_env() -> str:
 
 
 def build_engine(dsn: str | None = None) -> AsyncEngine:
-    return create_async_engine(dsn or dsn_from_env(), pool_pre_ping=True)
+    # json_serializer guards every JSONB write: pandas/numpy NaN/Inf values would
+    # otherwise serialize to the bare NaN/Infinity literals that JSONB rejects.
+    return create_async_engine(
+        dsn or dsn_from_env(),
+        pool_pre_ping=True,
+        json_serializer=dumps_safe,
+    )
 
 
 def set_engine(engine: AsyncEngine) -> None:
