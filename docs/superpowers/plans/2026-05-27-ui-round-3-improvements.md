@@ -14,7 +14,7 @@
 
 > **Test commands:**
 > - Frontend: `cd frontend && npx jest <path>` ; full check `npx jest && npx tsc --noEmit`
-> - Backend: `pytest tests/<path> -v`
+> - Backend: `uv run pytest tests/backend/<path> -v` — **MUST use `uv run`**; the bare `pytest` resolves to a broken Anaconda env (langchain_core mismatch). Backend tests live under `tests/backend/`.
 
 ---
 
@@ -57,12 +57,12 @@
 
 **Files:**
 - Modify: `backend/agents/graphs/profile_analyzer.py:548`
-- Test: `tests/agents/test_profile_summary_full.py` (create)
+- Test: `tests/backend/agents/test_profile_summary_full.py` (create)
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# tests/agents/test_profile_summary_full.py
+# tests/backend/agents/test_profile_summary_full.py
 """The propose_rules node must not truncate the data passport in ai_summary."""
 
 
@@ -85,7 +85,7 @@ def test_ai_summary_keeps_full_passport():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pytest tests/agents/test_profile_summary_full.py -v`
+Run: `uv run pytest tests/backend/agents/test_profile_summary_full.py -v`
 Expected: FAIL — `AttributeError: module ... has no attribute '_assemble_ai_summary'`
 
 - [ ] **Step 3: Extract a pure helper and drop the slice**
@@ -114,13 +114,13 @@ with:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pytest tests/agents/test_profile_summary_full.py -v`
+Run: `uv run pytest tests/backend/agents/test_profile_summary_full.py -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/agents/graphs/profile_analyzer.py tests/agents/test_profile_summary_full.py
+git add backend/agents/graphs/profile_analyzer.py tests/backend/agents/test_profile_summary_full.py
 git commit -m "fix(profile): stop truncating data passport in AI summary"
 ```
 
@@ -130,12 +130,12 @@ git commit -m "fix(profile): stop truncating data passport in AI summary"
 
 **Files:**
 - Modify: `backend/agents/emit.py`
-- Test: `tests/agents/test_emit.py` (create)
+- Test: `tests/backend/agents/test_emit.py` (create)
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# tests/agents/test_emit.py
+# tests/backend/agents/test_emit.py
 import json
 
 from backend.agents.emit import cap_result, emit
@@ -191,7 +191,7 @@ def test_emit_omits_stage_when_absent(tmp_path, monkeypatch):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pytest tests/agents/test_emit.py -v`
+Run: `uv run pytest tests/backend/agents/test_emit.py -v`
 Expected: FAIL — `ImportError: cannot import name 'cap_result'`
 
 - [ ] **Step 3: Implement in `backend/agents/emit.py`**
@@ -233,13 +233,13 @@ def emit(session_id: str, event: str, *, stage: str | None = None, **kwargs) -> 
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pytest tests/agents/test_emit.py -v`
+Run: `uv run pytest tests/backend/agents/test_emit.py -v`
 Expected: PASS (6 passed)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/agents/emit.py tests/agents/test_emit.py
+git add backend/agents/emit.py tests/backend/agents/test_emit.py
 git commit -m "feat(emit): add cap_result helper and optional stage tag"
 ```
 
@@ -250,7 +250,7 @@ git commit -m "feat(emit): add cap_result helper and optional stage tag"
 **Files:**
 - Modify: `backend/agents/graphs/profile_analyzer.py:286-311`
 - Modify: `backend/agents/graphs/deep_investigate.py:418-427`
-- Test: `tests/agents/test_emit_structured_result.py` (create)
+- Test: `tests/backend/agents/test_emit_structured_result.py` (create)
 
 > Both emit sites currently send only a lossy `preview` string. We add a full,
 > capped `result` field (the frontend prefers it and derives its own summary;
@@ -260,7 +260,7 @@ git commit -m "feat(emit): add cap_result helper and optional stage tag"
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# tests/agents/test_emit_structured_result.py
+# tests/backend/agents/test_emit_structured_result.py
 from backend.agents.graphs.deep_investigate import _result_payload
 
 
@@ -283,7 +283,7 @@ def test_result_payload_passthrough_non_json_string():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pytest tests/agents/test_emit_structured_result.py -v`
+Run: `uv run pytest tests/backend/agents/test_emit_structured_result.py -v`
 Expected: FAIL — `ImportError: cannot import name '_result_payload'`
 
 - [ ] **Step 3a: `deep_investigate.py` — add helper + structured emit**
@@ -360,13 +360,13 @@ Then change the `tool_result` emit (line 311) to include the structured result:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pytest tests/agents/test_emit_structured_result.py -v`
+Run: `uv run pytest tests/backend/agents/test_emit_structured_result.py -v`
 Expected: PASS (3 passed)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/agents/graphs/deep_investigate.py backend/agents/graphs/profile_analyzer.py tests/agents/test_emit_structured_result.py
+git add backend/agents/graphs/deep_investigate.py backend/agents/graphs/profile_analyzer.py tests/backend/agents/test_emit_structured_result.py
 git commit -m "feat(agents): emit full capped tool results for the activity feed"
 ```
 
@@ -383,7 +383,7 @@ git commit -m "feat(agents): emit full capped tool results for the activity feed
 - Modify: `backend/agents/graphs/transformation_advisor.py`
 - Modify: `backend/agents/graphs/custom_code_generator.py`
 - Modify: `backend/agents/graphs/scorecard_narrator.py`
-- Test: `tests/agents/test_graph_stage_tags.py` (create)
+- Test: `tests/backend/agents/test_graph_stage_tags.py` (create)
 
 > Each graph maps to exactly one frontend stage id. Apply the SAME wrapper
 > pattern in every file: import the raw emit, define `_STAGE`, define a local
@@ -407,7 +407,7 @@ Per-file table:
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# tests/agents/test_graph_stage_tags.py
+# tests/backend/agents/test_graph_stage_tags.py
 """Each graph module must tag emitted events with its frontend stage id."""
 import json
 
@@ -442,7 +442,7 @@ def test_graph_emit_wrapper_tags_stage(module_path, fn_name, expected_stage, tmp
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pytest tests/agents/test_graph_stage_tags.py -v`
+Run: `uv run pytest tests/backend/agents/test_graph_stage_tags.py -v`
 Expected: FAIL — emitted payloads have no `stage` key (KeyError).
 
 - [ ] **Step 3: Apply the wrapper in each file**
@@ -486,13 +486,13 @@ def _emit(session_id: str, event: str, **kw) -> None:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pytest tests/agents/test_graph_stage_tags.py -v`
+Run: `uv run pytest tests/backend/agents/test_graph_stage_tags.py -v`
 Expected: PASS (8 passed)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/agents/graphs/*.py tests/agents/test_graph_stage_tags.py
+git add backend/agents/graphs/*.py tests/backend/agents/test_graph_stage_tags.py
 git commit -m "feat(agents): tag streamed events with their pipeline stage"
 ```
 
@@ -504,12 +504,12 @@ git commit -m "feat(agents): tag streamed events with their pipeline stage"
 - Modify: `backend/temporal/workflows/dq_workflow.py:1005-1008`
 - Modify: `backend/api/rule_comparison.py:53-62`
 - Modify: `backend/api/schemas.py:297-305`
-- Test: `tests/api/test_rule_comparison_failing_rows.py` (create)
+- Test: `tests/backend/api/test_rule_comparison_failing_rows.py` (create)
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# tests/api/test_rule_comparison_failing_rows.py
+# tests/backend/api/test_rule_comparison_failing_rows.py
 from backend.api.rule_comparison import build_rule_comparison
 
 
@@ -537,7 +537,7 @@ def test_comparison_defaults_empty_failing_rows_when_absent():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pytest tests/api/test_rule_comparison_failing_rows.py -v`
+Run: `uv run pytest tests/backend/api/test_rule_comparison_failing_rows.py -v`
 Expected: FAIL — `KeyError: 'final_sample_failing_rows'`
 
 - [ ] **Step 3a: `build_rule_comparison` pass-through**
@@ -601,13 +601,13 @@ class RuleComparisonEntry(BaseModel):
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pytest tests/api/test_rule_comparison_failing_rows.py -v`
+Run: `uv run pytest tests/backend/api/test_rule_comparison_failing_rows.py -v`
 Expected: PASS (2 passed)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/temporal/workflows/dq_workflow.py backend/api/rule_comparison.py backend/api/schemas.py tests/api/test_rule_comparison_failing_rows.py
+git add backend/temporal/workflows/dq_workflow.py backend/api/rule_comparison.py backend/api/schemas.py tests/backend/api/test_rule_comparison_failing_rows.py
 git commit -m "feat(scorecard): carry capped failing-row samples to rule comparison"
 ```
 
@@ -1764,8 +1764,8 @@ Expected: build succeeds.
 
 - [ ] **Step 3: Backend tests + lint**
 
-Run: `pytest tests/agents tests/api -v && ruff check backend`
-Expected: all pass; no lint errors.
+Run: `uv run pytest tests/backend/agents tests/backend/api -v && uv run ruff check backend`
+Expected: all pass (except the 9 pre-existing DB-backed errors when Postgres is down); no lint errors.
 
 - [ ] **Step 4: Manual smoke (if infra is up)**
 
