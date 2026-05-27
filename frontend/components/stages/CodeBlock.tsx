@@ -1,6 +1,6 @@
 'use client'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { brightTheme } from './CodeBlock.theme'
 
 interface Props {
   code: string
@@ -11,12 +11,12 @@ export function CodeBlock({ code, language = 'python' }: Props) {
   return (
     <SyntaxHighlighter
       language={language}
-      style={vscDarkPlus}
+      style={brightTheme}
       customStyle={{
         margin: 0,
         borderRadius: '0.375rem',
-        fontSize: '11px',
-        lineHeight: '1.5',
+        fontSize: '12px',
+        lineHeight: '1.55',
         background: 'transparent',
         padding: '0.5rem',
       }}
