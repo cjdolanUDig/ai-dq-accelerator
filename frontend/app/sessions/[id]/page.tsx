@@ -55,7 +55,7 @@ export default function WorkspacePage() {
   const [viewingStage, setViewingStage] = useState<StageId | null>(null)
   const isViewingPast = viewingStage !== null
   const { session, isLoading } = useSession(id, { enabled: !isViewingPast })
-  const { events } = useAIStream(id)
+  const { events, isDone } = useAIStream(id)
   const { sessions } = useSessionsList()
 
   const filename = sessions.find(s => s.id === id)?.filename ?? id
@@ -67,7 +67,7 @@ export default function WorkspacePage() {
 
   const displayStage = viewingStage ?? active
   const isPastStage = viewingStage !== null && viewingStage !== active
-  const isStreaming = events.length > 0 && events[events.length - 1]?.event !== 'done'
+  const isStreaming = events.length > 0 && !isDone
 
   function renderStage() {
     if (!session && isLoading) return <LoadingStage />
