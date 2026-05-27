@@ -298,10 +298,12 @@ class RuleComparisonEntry(BaseModel):
     id: str
     check: str = ""
     column: str | None = None
+    category: str = ""
     initial_passed: bool
     initial_failures: int
     final_passed: bool
     final_failures: int
+    final_sample_failing_rows: list[dict] = []
     status: str  # fixed | regressed | improved | worsened | unchanged
 
 

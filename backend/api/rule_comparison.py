@@ -54,10 +54,12 @@ def build_rule_comparison(
             "id": rid,
             "check": r.get("check", ""),
             "column": r.get("column"),
+            "category": r.get("category", "") or "",
             "initial_passed": init_passed,
             "initial_failures": init_fail,
             "final_passed": final_passed,
             "final_failures": final_fail,
+            "final_sample_failing_rows": list(fin.get("sample_failing_rows") or [])[:20],
             "status": _status(init_passed, init_fail, final_passed, final_fail),
         })
     return out

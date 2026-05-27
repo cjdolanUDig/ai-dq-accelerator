@@ -1002,9 +1002,11 @@ class DQAcceleratorWorkflow:
 
             # 9. Append to log
             affected_rows = apply_result.get("affected_rows", 0)
-            # Capture per-rule state after this step (truncate sample rows to save space)
+            # Capture per-rule state after this step. Keep a CAPPED sample of
+            # failing rows (≤20) so the scorecard can show what is still failing.
             post_step_per_rule = [
-                {k: v for k, v in r.items() if k != "sample_failing_rows"} for r in new_per_rule
+                {**r, "sample_failing_rows": list(r.get("sample_failing_rows") or [])[:20]}
+                for r in new_per_rule
             ]
             self.transformation_log.append(
                 {
