@@ -6,7 +6,13 @@ import numpy as np
 import pandas as pd
 from langgraph.graph import StateGraph, END
 
-from backend.agents.emit import emit
+from backend.agents.emit import emit as _emit_raw
+
+_STAGE = "transform"
+
+
+def emit(session_id: str, event: str, **kw) -> None:
+    _emit_raw(session_id, event, stage=_STAGE, **kw)
 from backend.agents.retry import call_claude_with_retry
 from backend.agents.state import TransformationAdvisorState
 from backend.agents.prompts import TRANSFORMATION_ADVISOR_SYSTEM

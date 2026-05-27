@@ -20,7 +20,13 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.errors import GraphRecursionError
 from langgraph.prebuilt import ToolRuntime
 
-from backend.agents.emit import emit as _emit
+from backend.agents.emit import emit as _emit_raw
+
+_STAGE = "rules"
+
+
+def _emit(session_id: str, event: str, **kw) -> None:
+    _emit_raw(session_id, event, stage=_STAGE, **kw)
 from backend.agents.prompts import RULE_REVIEW_SYSTEM
 from backend.agents.state import ProfileAnalyzerState
 import dq_tools.explorer as _explorer

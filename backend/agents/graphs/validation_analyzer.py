@@ -4,7 +4,13 @@ import re
 import anthropic
 from langgraph.graph import END, StateGraph
 
-from backend.agents.emit import emit
+from backend.agents.emit import emit as _emit_raw
+
+_STAGE = "validate"
+
+
+def emit(session_id: str, event: str, **kw) -> None:
+    _emit_raw(session_id, event, stage=_STAGE, **kw)
 from backend.agents.retry import call_claude_with_retry
 from backend.agents.prompts import VALIDATION_ANALYZER_SYSTEM
 from backend.agents.state import ValidationAnalyzerState
