@@ -19,7 +19,7 @@ it('shows Overview by default and switches to the Rules tab', () => {
   render(<ScorecardStage sessionId="s1" data={base} />)
   expect(screen.getByText('Quality Score')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'rules' }))
-  expect(screen.getByText('not_null')).toBeInTheDocument()
+  expect(screen.getByText('Email must not be empty')).toBeInTheDocument()
   expect(screen.getByText('regex')).toBeInTheDocument()
   expect(screen.getAllByText(/fixed/i).length).toBeGreaterThan(0)
   expect(screen.getAllByText(/regressed/i).length).toBeGreaterThan(0)

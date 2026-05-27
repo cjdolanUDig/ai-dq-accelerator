@@ -164,10 +164,12 @@ export interface RuleComparisonEntry {
   id: string
   check: string
   column?: string
+  category?: string
   initial_passed: boolean
   initial_failures: number
   final_passed: boolean
   final_failures: number
+  final_sample_failing_rows?: Record<string, unknown>[]
   status: 'fixed' | 'regressed' | 'improved' | 'worsened' | 'unchanged'
 }
 
