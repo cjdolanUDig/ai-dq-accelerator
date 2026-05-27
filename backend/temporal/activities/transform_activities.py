@@ -17,7 +17,6 @@ async def suggest_next_transformation_activity(params: dict) -> dict:
 
 def _suggest_next_sync(params: dict) -> dict:
     import json
-    from pathlib import Path
     from backend.agents.graphs.transformation_advisor import run_transformation_advisor
     from dq_tools.rule_engine import run_rules
 
@@ -225,3 +224,39 @@ def _verify_transform_sync(params: dict) -> dict:
         return result
     except Exception:
         return {"verdict": "correct", "explanation": "Could not parse verification response.", "suggestion": None}
+
+
+@activity.defn
+async def snapshot_working_activity(params: dict) -> dict:
+    """params: {session_id, label}. Returns {ok: bool}."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, partial(_snapshot_working_sync, params))
+
+def _snapshot_working_sync(params: dict) -> dict:
+    from dq_tools.transformation_executor import snapshot_working
+    snapshot_working(params["session_id"], params["label"])
+    return {"ok": True}
+
+
+@activity.defn
+async def restore_working_activity(params: dict) -> dict:
+    """params: {session_id, label}. Returns {ok: bool}."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, partial(_restore_working_sync, params))
+
+def _restore_working_sync(params: dict) -> dict:
+    from dq_tools.transformation_executor import restore_working
+    restore_working(params["session_id"], params["label"])
+    return {"ok": True}
+
+
+@activity.defn
+async def drop_working_snapshot_activity(params: dict) -> dict:
+    """params: {session_id, label}. Returns {ok: bool}."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, partial(_drop_working_snapshot_sync, params))
+
+def _drop_working_snapshot_sync(params: dict) -> dict:
+    from dq_tools.transformation_executor import drop_working_snapshot
+    drop_working_snapshot(params["session_id"], params["label"])
+    return {"ok": True}

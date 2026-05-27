@@ -42,6 +42,9 @@ from backend.temporal.activities.transform_activities import (  # noqa: E402
     plan_transforms_activity,
     generate_custom_code_activity,
     verify_transform_activity,
+    snapshot_working_activity,
+    restore_working_activity,
+    drop_working_snapshot_activity,
 )
 from backend.temporal.activities.pipeline_activities import (  # noqa: E402
     generate_pipeline_activity,
@@ -87,6 +90,9 @@ async def main():
             plan_transforms_activity,
             generate_custom_code_activity,
             verify_transform_activity,
+            snapshot_working_activity,
+            restore_working_activity,
+            drop_working_snapshot_activity,
             generate_pipeline_activity,
             export_working_dataset_activity,
             zip_output_activity,
