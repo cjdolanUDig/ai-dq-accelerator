@@ -26,6 +26,9 @@ with workflow.unsafe.imports_passed_through():
         plan_transforms_activity,
         generate_custom_code_activity,
         verify_transform_activity,
+        snapshot_working_activity,  # noqa: F401  — wired into the loop in a later task
+        restore_working_activity,
+        drop_working_snapshot_activity,  # noqa: F401  — wired into the loop in a later task
     )
     from backend.temporal.activities.pipeline_activities import (
         generate_pipeline_activity,
@@ -38,6 +41,9 @@ with workflow.unsafe.imports_passed_through():
 ACTIVITY_RETRY = RetryPolicy(maximum_attempts=3, initial_interval=timedelta(seconds=2))
 ACTIVITY_TIMEOUT = timedelta(minutes=10)
 AI_ACTIVITY_TIMEOUT = timedelta(minutes=60)
+
+# Max bounded custom-code repair attempts per failed transform step.
+MAX_REPAIR_ATTEMPTS = 2
 
 # Cap on sample_failing_rows kept per rule in workflow state/history. The scorecard
 # comparison surfaces at most 20 rows and ValidateStage shows 5, so this loses
@@ -327,6 +333,152 @@ class DQAcceleratorWorkflow:
         self.execution_escalation = None
         self.stage = "TRANSFORMATION_LOOP"
         return decision
+
+    async def _build_repair_step(self, step: dict, failure_reason: str) -> dict:
+        """Translate a failed (prebuilt or custom) step into a custom-code step
+        spec the generator can act on, carrying the original intent."""
+        column = step.get("column") or ""
+        params = step.get("params", {})
+        target_columns = (
+            params.get("columns")
+            or ([column] if column else [])
+            or step.get("target_columns", [])
+        )
+        intent = step.get("rationale") or step.get("intent") or (
+            f"Achieve the effect of a '{step.get('type')}' transform on {target_columns}"
+        )
+        return {
+            "id": f"{step['id']}_repair",
+            "type": "custom",
+            "intent": intent,
+            "target_columns": target_columns,
+            "approach": (
+                f"Original transform was type '{step.get('type')}' with params {params}. "
+                f"Reproduce its intent in pandas."
+            ),
+            "targets_rules": step.get("targets_rules", []),
+        }
+
+    async def _attempt_repair(
+        self,
+        steps: list,
+        i: int,
+        failure_reason: str,
+        pre_step_score: float,
+        pre_step_total_failures: int,
+        pre_step_passing: set,
+        snapshot_label: str,
+    ) -> dict:
+        """Bounded custom-code repair of a failed step.
+
+        Returns {repaired: bool, custom_code: str|None, attempts: int,
+        actual_score_delta: float, actual_resolution: float, regressions: list,
+        new_per_rule: list}. On failure, restores working_data from the snapshot.
+        """
+        step = steps[i]
+        repair_step = await self._build_repair_step(step, failure_reason)
+        attempts = 0
+        last_code: str | None = None
+
+        while attempts < MAX_REPAIR_ATTEMPTS:
+            attempts += 1
+            workflow.logger.info(
+                "auto-repairing %s (attempt %d/%d)",
+                step["id"],
+                attempts,
+                MAX_REPAIR_ATTEMPTS,
+            )
+
+            await workflow.execute_activity(
+                restore_working_activity,
+                {"session_id": self.session_id, "label": snapshot_label},
+                start_to_close_timeout=ACTIVITY_TIMEOUT,
+                retry_policy=ACTIVITY_RETRY,
+            )
+
+            code_result = await workflow.execute_activity(
+                generate_custom_code_activity,
+                {
+                    "session_id": self.session_id,
+                    "step": repair_step,
+                    "prior_context": "",
+                    "human_instruction": None,
+                    "failure_context": failure_reason,
+                },
+                start_to_close_timeout=AI_ACTIVITY_TIMEOUT,
+                retry_policy=ACTIVITY_RETRY,
+            )
+            if not code_result.get("validation_passed"):
+                continue
+            last_code = code_result.get("custom_code")
+
+            repair_spec = {
+                "id": f"{step['id']}_repair_{attempts}",
+                "type": "custom",
+                "params": {},
+                "custom_code": last_code,
+                "rationale": f"Auto-repair of {step['id']}: {failure_reason}",
+            }
+            try:
+                apply_result = await workflow.execute_activity(
+                    apply_transformation_activity,
+                    {"session_id": self.session_id, "transformation_spec": repair_spec},
+                    start_to_close_timeout=ACTIVITY_TIMEOUT,
+                    retry_policy=ACTIVITY_RETRY,
+                )
+            except Exception:
+                continue
+
+            scorecard_result = await workflow.execute_activity(
+                update_scorecard_activity,
+                {"session_id": self.session_id, "approved_rules": self.approved_rules},
+                start_to_close_timeout=ACTIVITY_TIMEOUT,
+                retry_policy=ACTIVITY_RETRY,
+            )
+            new_score = scorecard_result.get("quality_score", pre_step_score)
+            new_per_rule = scorecard_result.get("per_rule", [])
+            score_delta = new_score - pre_step_score
+            post_failures = _total_failures(new_per_rule)
+            resolution = _resolution_from_counts(pre_step_total_failures, post_failures)
+            targets = set(step.get("targets_rules", []))
+            regressions = [
+                {
+                    "rule_id": r.get("id"),
+                    "column": r.get("column"),
+                    "check": r.get("check"),
+                    "failure_count": r.get("failure_count", 0),
+                    "rationale": (r.get("rationale", "") or "")[:80],
+                }
+                for r in new_per_rule
+                if r.get("id") in pre_step_passing
+                and not r.get("passed")
+                and r.get("id") not in targets
+            ]
+
+            improved = (
+                apply_result.get("affected_rows", 0) > 0
+                and not regressions
+                and score_delta >= 0
+            )
+            if improved:
+                self.current_score = new_score
+                return {
+                    "repaired": True,
+                    "custom_code": last_code,
+                    "attempts": attempts,
+                    "actual_score_delta": score_delta,
+                    "actual_resolution": resolution,
+                    "regressions": regressions,
+                    "new_per_rule": new_per_rule,
+                }
+
+        await workflow.execute_activity(
+            restore_working_activity,
+            {"session_id": self.session_id, "label": snapshot_label},
+            start_to_close_timeout=ACTIVITY_TIMEOUT,
+            retry_policy=ACTIVITY_RETRY,
+        )
+        return {"repaired": False, "custom_code": last_code, "attempts": attempts}
 
     async def _snapshot(self, ui_stage: str, payload: dict) -> None:
         """Persist a stage snapshot. Best-effort — failures are logged, not raised."""
