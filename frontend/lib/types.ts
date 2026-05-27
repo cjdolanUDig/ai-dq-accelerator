@@ -160,6 +160,17 @@ export interface SessionState {
   zip_path: string
 }
 
+export interface RuleComparisonEntry {
+  id: string
+  check: string
+  column?: string
+  initial_passed: boolean
+  initial_failures: number
+  final_passed: boolean
+  final_failures: number
+  status: 'fixed' | 'regressed' | 'improved' | 'worsened' | 'unchanged'
+}
+
 export interface ScorecardResponse {
   stage: WorkflowStage
   baseline_score: number
@@ -173,6 +184,7 @@ export interface ScorecardResponse {
   rules_total: number
   narrative: string
   transformation_log: TransformationLogEntry[]
+  rule_comparison: RuleComparisonEntry[]
 }
 
 export interface CreateSessionResponse {

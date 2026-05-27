@@ -7,6 +7,7 @@ import { Chip } from '@/components/ui/Chip'
 import { toTitleCase } from '@/lib/text'
 import { CodeBlock } from './CodeBlock'
 import { AISummary } from '@/components/ui/AISummary'
+import { RuleComparisonTable } from './_scorecard/RuleComparisonTable'
 
 interface Props {
   sessionId: string
@@ -156,6 +157,7 @@ function TransformRow({ entry }: { entry: TransformationLogEntry }) {
 
 export function ScorecardStage({ sessionId, data: dataProp }: Props) {
   const [data, setData] = useState<ScorecardResponse | null>(dataProp ?? null)
+  const [view, setView] = useState<'overview' | 'rules'>('overview')
 
   useEffect(() => {
     if (dataProp) return
@@ -183,12 +185,34 @@ export function ScorecardStage({ sessionId, data: dataProp }: Props) {
 
   return (
     <div className="p-5 flex flex-col gap-4">
-      <div className="flex flex-col gap-0.5">
-        <h1 className="text-base font-bold text-fg">Quality Scorecard</h1>
-        <p className="text-xs text-fg-muted">
-          Summary of every improvement made to your dataset across the transform pass.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-col gap-0.5">
+          <h1 className="text-base font-bold text-fg">Quality Scorecard</h1>
+          <p className="text-xs text-fg-muted">
+            Summary of every improvement made to your dataset across the transform pass.
+          </p>
+        </div>
+        <div className="h-7 flex items-center bg-elevated rounded-md p-0.5 gap-0.5 shrink-0">
+          {(['overview', 'rules'] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setView(v)}
+              className={[
+                'text-xs px-3 py-1 rounded-md capitalize transition-colors',
+                view === v ? 'bg-surface text-fg border border-border' : 'text-fg-muted hover:text-fg',
+              ].join(' ')}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {view === 'rules' ? (
+        <RuleComparisonTable rows={data.rule_comparison ?? []} />
+      ) : (
+        <>
 
       <div className="bg-surface border border-border rounded-xl p-5">
         <div className="flex items-center gap-6 flex-wrap">
@@ -256,6 +280,8 @@ export function ScorecardStage({ sessionId, data: dataProp }: Props) {
             ))}
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   )
