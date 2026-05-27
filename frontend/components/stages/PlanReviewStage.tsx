@@ -6,6 +6,7 @@ import { approvePlan } from '@/lib/api'
 import { Chip } from '@/components/ui/Chip'
 import { toTitleCase } from '@/lib/text'
 import { PlanningStage } from './PlanningStage'
+import { AISummary } from '@/components/ui/AISummary'
 
 interface Props {
   session: SessionState
@@ -258,16 +259,7 @@ export function PlanReviewStage({ session, readOnly, demoMode }: Props) {
               projected
             </span>
           </div>
-          {transform_plan.summary && (
-            <div className="bg-accent-purple/15 border border-accent-purple/30 rounded-lg p-3 flex flex-col gap-1.5">
-              <div className="text-xs font-semibold uppercase tracking-widest text-accent-purple-deep">
-                ✦ AI SUMMARY
-              </div>
-              <p className="text-xs text-accent-purple-deep leading-relaxed">
-                {transform_plan.summary}
-              </p>
-            </div>
-          )}
+          {transform_plan.summary && <AISummary title="✦ AI SUMMARY" body={transform_plan.summary} />}
         </div>
 
         <div className="flex flex-col gap-2">

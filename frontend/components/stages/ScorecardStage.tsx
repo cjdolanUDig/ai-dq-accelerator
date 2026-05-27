@@ -6,6 +6,7 @@ import type { ScorecardResponse, TransformationLogEntry } from '@/lib/types'
 import { Chip } from '@/components/ui/Chip'
 import { toTitleCase } from '@/lib/text'
 import { CodeBlock } from './CodeBlock'
+import { AISummary } from '@/components/ui/AISummary'
 
 interface Props {
   sessionId: string
@@ -234,14 +235,7 @@ export function ScorecardStage({ sessionId, data: dataProp }: Props) {
         ))}
       </div>
 
-      {data.narrative && (
-        <div className="bg-accent-purple/15 border border-accent-purple/30 rounded-xl p-4 flex flex-col gap-1.5">
-          <div className="text-xs font-semibold uppercase tracking-widest text-accent-purple-deep">
-            ✦ AI NARRATIVE
-          </div>
-          <p className="text-xs text-accent-purple-deep leading-relaxed">{data.narrative}</p>
-        </div>
-      )}
+      {data.narrative && <AISummary title="✦ AI NARRATIVE" body={data.narrative} />}
 
       {data.transformation_log.length > 0 && (
         <div className="flex flex-col gap-2">

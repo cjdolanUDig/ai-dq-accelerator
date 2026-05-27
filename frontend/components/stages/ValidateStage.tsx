@@ -3,6 +3,7 @@
 import { ArrowRight } from 'lucide-react'
 import type { SessionState, PerRuleResult } from '@/lib/types'
 import { Chip, type StatusTone } from '@/components/ui/Chip'
+import { AISummary } from '@/components/ui/AISummary'
 
 interface Props {
   session: SessionState | null
@@ -131,20 +132,6 @@ function RuleCard({ rule }: { rule: PerRuleResult }) {
   )
 }
 
-function ProseSection({ label, body }: { label: string; body: string }) {
-  if (!body) return null
-  return (
-    <div className="bg-accent-purple/15 border border-accent-purple/30 rounded-xl p-4 flex flex-col gap-1.5">
-      <div className="text-xs font-semibold uppercase tracking-widest text-accent-purple-deep">
-        {label}
-      </div>
-      <p className="text-xs text-accent-purple-deep leading-relaxed whitespace-pre-wrap">
-        {body}
-      </p>
-    </div>
-  )
-}
-
 export function ValidateStage({ session, readOnly, onContinue }: Props) {
   const results = session?.validation_results
   const perRule = results?.per_rule
@@ -229,8 +216,8 @@ export function ValidateStage({ session, readOnly, onContinue }: Props) {
         )}
       </div>
 
-      <ProseSection label="✦ VALIDATION ANALYSIS" body={session?.validation_summary ?? ''} />
-      <ProseSection label="✦ ANOMALY ANALYSIS" body={session?.anomaly_summary ?? ''} />
+      <AISummary title="✦ VALIDATION ANALYSIS" body={session?.validation_summary ?? ''} />
+      <AISummary title="✦ ANOMALY ANALYSIS" body={session?.anomaly_summary ?? ''} />
 
       {passed > 0 && (
         <section data-testid="passed-section" className="flex flex-col gap-2">

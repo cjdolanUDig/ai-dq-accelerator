@@ -369,13 +369,15 @@ describe('ValidateStage', () => {
         })}
       />,
     )
-    const validationLabel = screen.getByText('✦ VALIDATION ANALYSIS')
-    expect(validationLabel.className).toContain('text-accent-purple-deep')
+    // AISummary renders the title inside a button; check the button's className
+    const validationButton = screen.getByRole('button', { name: /VALIDATION ANALYSIS/ })
+    expect(validationButton.className).toContain('text-accent-purple-deep')
+    // Body text is present (inside the Markdown wrapper div which carries text-accent-purple-deep)
     const validationBody = screen.getByText(/format issues on email/)
-    expect(validationBody.className).toContain('text-accent-purple-deep')
+    expect(validationBody.closest('[class*="text-accent-purple-deep"]')).not.toBeNull()
 
-    const anomalyLabel = screen.getByText('✦ ANOMALY ANALYSIS')
-    expect(anomalyLabel.className).toContain('text-accent-purple-deep')
+    const anomalyButton = screen.getByRole('button', { name: /ANOMALY ANALYSIS/ })
+    expect(anomalyButton.className).toContain('text-accent-purple-deep')
     expect(screen.getByText(/data-entry mistakes/)).toBeInTheDocument()
   })
 
