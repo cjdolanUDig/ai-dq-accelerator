@@ -109,6 +109,13 @@ def _parse_json(text: str):
     return None
 
 
+def _assemble_ai_summary(state: dict) -> str:
+    """Combine overview notes with the FULL data passport (no truncation)."""
+    overview = state.get("overview_notes", "") or ""
+    passport = state.get("data_passport", "") or ""
+    return f"{overview}\n\n{passport}" if passport else overview
+
+
 def _execute_tool(session_id: str, tool_name: str, tool_input: dict):
     """Dispatch an explorer tool call by name."""
     try:
@@ -545,7 +552,7 @@ Output ONLY a JSON array of strings. Start with [ and end with ].""",
         )
         top_issues = []
 
-    ai_summary = state["overview_notes"] + "\n\n" + state["data_passport"][:1500]
+    ai_summary = _assemble_ai_summary(state)
 
     return {
         **state,
