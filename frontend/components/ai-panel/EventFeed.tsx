@@ -15,7 +15,7 @@ interface CardProps {
   highlighted: boolean
 }
 
-const cardBase = 'bg-surface rounded-lg p-3 flex flex-col gap-1.5 border min-w-0 overflow-hidden'
+const cardBase = 'bg-surface rounded-lg p-3 flex flex-col gap-1.5 border min-w-0 overflow-hidden shrink-0'
 const bodyClass = 'text-xs font-mono text-fg-muted leading-relaxed whitespace-pre-wrap break-all'
 const toolNameClass = 'text-xs font-mono text-fg truncate min-w-0'
 const timestampClass = 'text-xs text-fg-muted ml-auto shrink-0 tabular-nums'

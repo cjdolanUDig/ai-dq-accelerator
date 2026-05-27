@@ -44,4 +44,18 @@ describe('EventFeed', () => {
 
     expect(screen.getByRole('button', { name: /scroll to bottom/i })).toBeInTheDocument()
   })
+
+  it('renders event cards as non-shrinking so the scroller scrolls instead of squishing them', () => {
+    const events = [
+      { event: 'tool_call', ts: 1, tool: 'dq_get_value_counts', input: { column: 'email' } },
+      { event: 'tool_result', ts: 2, tool: 'dq_get_value_counts', preview: 'x'.repeat(400) },
+    ] as any
+    const { container } = render(<EventFeed events={events} />)
+    const scroller = container.querySelector('[data-testid="event-feed-scroller"]')!
+    const cards = Array.from(scroller.children).filter(
+      (el) => el.className.includes('rounded-lg') && el.className.includes('border'),
+    )
+    expect(cards.length).toBeGreaterThan(0)
+    cards.forEach((c) => expect(c.className).toContain('shrink-0'))
+  })
 })
