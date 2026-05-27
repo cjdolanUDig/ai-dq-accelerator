@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -75,6 +76,13 @@ def _snapshot_table(label: str) -> str:
     return f"working_data__{label}"
 
 
+def _log_snapshot_path(session_id: str, label: str) -> Path:
+    """Return the path to the log snapshot file for a label."""
+    if not re.fullmatch(r"[A-Za-z0-9_]+", label or ""):
+        raise ValueError(f"Unsafe snapshot label: {label!r}")
+    return _log_path(session_id).parent / f"transformation_log__{label}.json"
+
+
 def snapshot_working(session_id: str, label: str) -> None:
     """Copy ``working_data`` into a labelled snapshot table for later rollback."""
     table = _snapshot_table(label)
@@ -85,6 +93,13 @@ def snapshot_working(session_id: str, label: str) -> None:
             con.execute(f'CREATE TABLE "{table}" AS SELECT * FROM working_data')
         finally:
             con.close()
+
+    log_path = _log_path(session_id)
+    log_snap = _log_snapshot_path(session_id, label)
+    if log_path.exists():
+        shutil.copyfile(log_path, log_snap)
+    elif log_snap.exists():
+        log_snap.unlink()
 
 
 def restore_working(session_id: str, label: str) -> None:
@@ -100,6 +115,13 @@ def restore_working(session_id: str, label: str) -> None:
         finally:
             con.close()
 
+    log_path = _log_path(session_id)
+    log_snap = _log_snapshot_path(session_id, label)
+    if log_snap.exists():
+        shutil.copyfile(log_snap, log_path)
+    elif log_path.exists():
+        log_path.unlink()
+
 
 def drop_working_snapshot(session_id: str, label: str) -> None:
     """Delete a labelled snapshot table; no-op if it does not exist."""
@@ -110,6 +132,10 @@ def drop_working_snapshot(session_id: str, label: str) -> None:
             con.execute(f'DROP TABLE IF EXISTS "{table}"')
         finally:
             con.close()
+
+    log_snap = _log_snapshot_path(session_id, label)
+    if log_snap.exists():
+        log_snap.unlink()
 
 
 def _apply_transform(df: pd.DataFrame, spec: dict) -> tuple[pd.DataFrame, int]:
