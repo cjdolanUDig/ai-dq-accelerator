@@ -1,7 +1,10 @@
+// frontend/components/stages/TriageStage.tsx
 'use client'
 import { useState } from 'react'
+import { ArrowRight, Check, X } from 'lucide-react'
 import type { SessionState, TriageClassification } from '@/lib/types'
 import { approveTriage } from '@/lib/api'
+import { Chip, type StatusTone } from '@/components/ui/Chip'
 
 interface Props {
   session: SessionState
@@ -11,40 +14,37 @@ interface Props {
 type CardDecision = 'accept' | 'keep' | 'pending'
 type FilterMode = 'all' | 'needs_decision' | 'fixable' | 'unfixable'
 
-const CLASSIFICATION_LABELS: Record<string, string> = {
-  transform_fixable: 'transform_fixable',
-  threshold_too_strict: 'threshold_too_strict',
-  unfixable: 'unfixable',
-  eval_error: 'eval_error',
+const CLASSIFICATION_TONE: Record<TriageClassification['classification'], StatusTone> = {
+  transform_fixable: 'success',
+  threshold_too_strict: 'warning',
+  unfixable: 'danger',
+  eval_error: 'warning',
 }
 
-const CLASSIFICATION_COLORS: Record<string, string> = {
-  transform_fixable: 'bg-success/20 text-success-light',
-  threshold_too_strict: 'bg-warning/20 text-warning',
-  unfixable: 'bg-red-500/20 text-red-400',
-  eval_error: 'bg-amber-500/20 text-amber-400',
+const CLASSIFICATION_LABEL: Record<TriageClassification['classification'], string> = {
+  transform_fixable: 'Transform Fixable',
+  threshold_too_strict: 'Threshold Too Strict',
+  unfixable: 'Unfixable',
+  eval_error: 'Eval Error',
 }
 
-const CONFIDENCE_COLORS: Record<string, string> = {
-  high: 'text-success-light',
-  medium: 'text-warning',
-  low: 'text-text-muted',
+const CONFIDENCE_TONE: Record<TriageClassification['confidence'], StatusTone> = {
+  high: 'success',
+  medium: 'warning',
+  low: 'neutral',
 }
 
-function ClassificationBadge({ classification }: { classification: string }) {
-  return (
-    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full font-mono ${CLASSIFICATION_COLORS[classification] ?? 'bg-border text-text-muted'}`}>
-      {CLASSIFICATION_LABELS[classification] ?? classification}
-    </span>
-  )
+const CONFIDENCE_LABEL: Record<TriageClassification['confidence'], string> = {
+  high: 'High Confidence',
+  medium: 'Medium Confidence',
+  low: 'Low Confidence',
 }
 
-function ConfidenceBadge({ confidence }: { confidence: string }) {
-  return (
-    <span className={`text-xs ${CONFIDENCE_COLORS[confidence] ?? 'text-text-muted'}`}>
-      confidence: {confidence}
-    </span>
-  )
+const FILTER_LABEL: Record<FilterMode, string> = {
+  all: 'All',
+  needs_decision: 'Needs Decision',
+  fixable: 'Fixable',
+  unfixable: 'Unfixable / Error',
 }
 
 interface CardProps {
@@ -57,68 +57,95 @@ interface CardProps {
 function TriageCard({ item, decision, onDecide, readOnly }: CardProps) {
   const needsDecision = item.classification !== 'transform_fixable'
 
-  const borderColor = {
-    transform_fixable: 'border-l-success/60',
-    threshold_too_strict: 'border-l-warning/60',
-    unfixable: 'border-l-red-500/60',
-    eval_error: 'border-l-amber-500/60',
-  }[item.classification] ?? 'border-l-border'
+  const chrome =
+    !needsDecision || decision === 'pending'
+      ? 'border-border'
+      : decision === 'accept'
+        ? 'border-success ring-1 ring-success/40'
+        : 'border-danger ring-1 ring-danger/40'
+
+  const isThreshold = item.classification === 'threshold_too_strict'
+  const acceptLabel = isThreshold ? 'Accept Change' : 'Accept Removal'
+  const keepLabel = isThreshold ? 'Keep Original' : 'Keep Rule'
 
   return (
-    <div className={`rounded-lg bg-surface-raised border border-border p-4 border-l-2 ${borderColor}`}>
-      <div className="flex items-start justify-between gap-3 mb-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <ClassificationBadge classification={item.classification} />
-          <span className="text-sm font-semibold text-text font-mono">{item.rule_id}</span>
-          {item.check && <span className="text-xs text-text-muted/70 font-mono">· {item.check}</span>}
-          {item.column && <span className="text-xs text-text-muted/70 font-mono">· {item.column}</span>}
+    <div
+      data-triage-card={item.rule_id}
+      className={`bg-surface border rounded-lg p-4 flex flex-col gap-2 ${chrome}`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
+          <Chip variant="status" tone={CLASSIFICATION_TONE[item.classification]}>
+            {CLASSIFICATION_LABEL[item.classification]}
+          </Chip>
+          <span className="text-sm font-semibold text-fg font-mono">{item.rule_id}</span>
+          {item.check && (
+            <span className="text-xs text-fg-subtle font-mono">· {item.check}</span>
+          )}
+          {item.column && (
+            <span className="text-xs text-fg-subtle font-mono">· {item.column}</span>
+          )}
         </div>
-        <ConfidenceBadge confidence={item.confidence} />
+        <Chip
+          variant="status"
+          tone={CONFIDENCE_TONE[item.confidence]}
+          className="shrink-0"
+        >
+          {CONFIDENCE_LABEL[item.confidence]}
+        </Chip>
       </div>
 
-      <p className="text-sm text-text-muted leading-relaxed mb-3">{item.reason}</p>
+      <p className="text-sm text-fg-muted leading-relaxed">{item.reason}</p>
 
-      {needsDecision && !readOnly && (
-        <div className="space-y-2">
+      {needsDecision && (
+        <>
           {item.classification === 'threshold_too_strict' && item.proposed_threshold !== undefined && (
-            <div className="text-xs text-text-muted/80 mb-2">
-              Proposed: raise threshold to <span className="font-semibold text-warning">{(item.proposed_threshold * 100).toFixed(2)}%</span>
+            <div className="text-xs text-fg-muted">
+              Proposed: raise threshold to{' '}
+              <span className="font-semibold text-warning-deep">
+                {(item.proposed_threshold * 100).toFixed(2)}%
+              </span>
             </div>
           )}
           {(item.classification === 'unfixable' || item.classification === 'eval_error') && item.proposed_remove && (
-            <div className="text-xs text-text-muted/80 mb-2">
-              Proposed: <span className="font-semibold text-red-400">remove rule</span>
+            <div className="text-xs text-fg-muted">
+              Proposed: <span className="font-semibold text-danger-deep">remove rule</span>
             </div>
           )}
-          <div className="flex gap-2">
-            <button
-              onClick={() => onDecide(item.rule_id, decision === 'accept' ? 'pending' : 'accept')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                decision === 'accept'
-                  ? 'bg-success/20 text-success border border-success/40'
-                  : 'bg-surface border border-border text-text-muted hover:border-success/40 hover:text-success'
-              }`}
-            >
-              <span>✓</span>
-              {item.classification === 'threshold_too_strict' ? 'Accept Change' : 'Accept Removal'}
-            </button>
-            <button
-              onClick={() => onDecide(item.rule_id, decision === 'keep' ? 'pending' : 'keep')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                decision === 'keep'
-                  ? 'bg-red-500/20 text-red-400 border border-red-500/40'
-                  : 'bg-surface border border-border text-text-muted hover:border-red-500/40 hover:text-red-400'
-              }`}
-            >
-              <span>✗</span>
-              {item.classification === 'threshold_too_strict' ? 'Keep Original' : 'Keep Rule'}
-            </button>
-          </div>
-        </div>
+        </>
       )}
 
-      {!needsDecision && (
-        <div className="text-xs text-text-muted/50 italic">(no decision required)</div>
+      {!needsDecision && !readOnly && (
+        <div className="text-xs text-fg-subtle italic">(no decision required)</div>
+      )}
+
+      {needsDecision && !readOnly && (
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => onDecide(item.rule_id, decision === 'accept' ? 'pending' : 'accept')}
+            className={
+              decision === 'accept'
+                ? 'inline-flex items-center gap-1.5 bg-success-deep border border-success-deep text-on-brand text-[13px] font-semibold px-3 py-1.5 rounded-md transition-colors'
+                : 'inline-flex items-center gap-1.5 bg-surface border border-success text-success-deep text-[13px] font-semibold px-3 py-1.5 rounded-md hover:bg-success/10 transition-colors'
+            }
+          >
+            <Check size={14} strokeWidth={2} aria-hidden />
+            {acceptLabel}
+          </button>
+          <button
+            type="button"
+            onClick={() => onDecide(item.rule_id, decision === 'keep' ? 'pending' : 'keep')}
+            className={
+              decision === 'keep'
+                ? 'inline-flex items-center gap-1.5 bg-danger-deep border border-danger-deep text-on-brand text-[13px] font-semibold px-3 py-1.5 rounded-md transition-colors'
+                : 'inline-flex items-center gap-1.5 bg-surface border border-danger text-danger-deep text-[13px] font-semibold px-3 py-1.5 rounded-md hover:bg-danger/10 transition-colors'
+            }
+          >
+            <X size={14} strokeWidth={2} aria-hidden />
+            {keepLabel}
+          </button>
+        </div>
       )}
     </div>
   )
@@ -132,7 +159,7 @@ export function TriageStage({ session, readOnly }: Props) {
     return Object.fromEntries(
       classifications
         .filter(c => c.classification !== 'transform_fixable')
-        .map(c => [c.rule_id, 'pending' as CardDecision])
+        .map(c => [c.rule_id, 'pending' as CardDecision]),
     )
   })
   const [filter, setFilter] = useState<FilterMode>('all')
@@ -141,10 +168,17 @@ export function TriageStage({ session, readOnly }: Props) {
 
   if (stage === 'TRIAGING' || !triage_result) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-4 text-text-muted p-8">
-        <div className="w-8 h-8 border-2 border-indigo border-t-transparent rounded-full animate-spin" />
-        <div className="text-sm text-center">AI is investigating failing rules...</div>
-        <div className="text-xs text-text-muted/60 text-center">The AI panel on the right shows live progress.</div>
+      <div className="p-5">
+        <div className="bg-surface border border-border rounded-xl p-6 flex items-center gap-3">
+          <div
+            role="status"
+            aria-label="Triaging"
+            className="w-4 h-4 border-2 border-brand-primary border-t-transparent rounded-full animate-spin shrink-0"
+          />
+          <span className="text-xs text-fg-muted">
+            AI is investigating failing rules…
+          </span>
+        </div>
       </div>
     )
   }
@@ -157,6 +191,9 @@ export function TriageStage({ session, readOnly }: Props) {
 
   const needsDecision = classifications.filter(c => c.classification !== 'transform_fixable')
   const canSubmit = needsDecision.every(c => decisions[c.rule_id] !== 'pending')
+  const acceptedCount = needsDecision.filter(c => decisions[c.rule_id] === 'accept').length
+  const keptCount = needsDecision.filter(c => decisions[c.rule_id] === 'keep').length
+  const pendingCount = needsDecision.filter(c => decisions[c.rule_id] === 'pending').length
 
   const filteredClassifications = classifications.filter(c => {
     if (filter === 'all') return true
@@ -165,8 +202,6 @@ export function TriageStage({ session, readOnly }: Props) {
     if (filter === 'unfixable') return c.classification === 'unfixable' || c.classification === 'eval_error'
     return true
   })
-
-  const pendingCount = needsDecision.filter(c => decisions[c.rule_id] === 'pending').length
 
   async function handleSubmit() {
     setSubmitting(true)
@@ -177,7 +212,7 @@ export function TriageStage({ session, readOnly }: Props) {
         .map(c => ({ rule_id: c.rule_id, new_threshold: c.proposed_threshold! }))
 
       const rejectedRuleIds = classifications
-        .filter(c => ['unfixable', 'eval_error'].includes(c.classification) && decisions[c.rule_id] === 'accept')
+        .filter(c => (c.classification === 'unfixable' || c.classification === 'eval_error') && decisions[c.rule_id] === 'accept')
         .map(c => c.rule_id)
 
       await approveTriage(session.session_id, acceptedThresholdChanges, rejectedRuleIds)
@@ -188,91 +223,122 @@ export function TriageStage({ session, readOnly }: Props) {
   }
 
   return (
-    <div className="p-6 space-y-5 max-w-3xl mx-auto">
-      {/* Summary row */}
-      <div className="rounded-xl bg-surface-raised border border-border p-4">
-        <div className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">Triage Summary</div>
-        <div className="flex flex-wrap gap-3">
-          {summary.transform_fixable > 0 && (
-            <span className="flex items-center gap-1.5 text-sm">
-              <span className="w-2 h-2 rounded-full bg-success/60 shrink-0" />
-              <span className="text-text-muted">{summary.transform_fixable} transform-fixable</span>
-            </span>
-          )}
-          {summary.threshold_too_strict > 0 && (
-            <span className="flex items-center gap-1.5 text-sm">
-              <span className="w-2 h-2 rounded-full bg-warning/60 shrink-0" />
-              <span className="text-text-muted">{summary.threshold_too_strict} threshold-too-strict</span>
-            </span>
-          )}
-          {summary.unfixable > 0 && (
-            <span className="flex items-center gap-1.5 text-sm">
-              <span className="w-2 h-2 rounded-full bg-red-500/60 shrink-0" />
-              <span className="text-text-muted">{summary.unfixable} unfixable</span>
-            </span>
-          )}
-          {summary.eval_error > 0 && (
-            <span className="flex items-center gap-1.5 text-sm">
-              <span className="w-2 h-2 rounded-full bg-amber-500/60 shrink-0" />
-              <span className="text-text-muted">{summary.eval_error} eval-error</span>
-            </span>
-          )}
+    <div className="flex flex-col h-full">
+      <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-4">
+        <div className="flex flex-col gap-0.5">
+          <h1 className="text-base font-bold text-fg">Triage Results</h1>
+          <p className="text-xs text-fg-muted">
+            Review the AI's classification of every failing rule and decide what to do with each.
+          </p>
+        </div>
+
+        <div className="bg-surface border border-border rounded-xl p-4 flex flex-col gap-3">
+          <div className="text-xs font-semibold uppercase tracking-wider text-fg-muted">
+            Triage Summary
+          </div>
+          <div className="flex flex-wrap gap-4">
+            {summary.transform_fixable > 0 && (
+              <span className="flex items-center gap-1.5 text-sm">
+                <span className="w-2 h-2 rounded-full bg-success shrink-0" />
+                <span className="text-fg-muted">{summary.transform_fixable} Transform Fixable</span>
+              </span>
+            )}
+            {summary.threshold_too_strict > 0 && (
+              <span className="flex items-center gap-1.5 text-sm">
+                <span className="w-2 h-2 rounded-full bg-warning shrink-0" />
+                <span className="text-fg-muted">{summary.threshold_too_strict} Threshold Too Strict</span>
+              </span>
+            )}
+            {summary.unfixable > 0 && (
+              <span className="flex items-center gap-1.5 text-sm">
+                <span className="w-2 h-2 rounded-full bg-danger shrink-0" />
+                <span className="text-fg-muted">{summary.unfixable} Unfixable</span>
+              </span>
+            )}
+            {summary.eval_error > 0 && (
+              <span className="flex items-center gap-1.5 text-sm">
+                <span className="w-2 h-2 rounded-full bg-warning shrink-0" />
+                <span className="text-fg-muted">{summary.eval_error} Eval Error</span>
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {(['all', 'needs_decision', 'fixable', 'unfixable'] as FilterMode[]).map(f => {
+            const isActive = filter === f
+            return (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setFilter(f)}
+                data-filter={f}
+                data-active={isActive}
+                className={[
+                  'text-xs px-2.5 py-1 rounded-md border bg-surface transition-colors',
+                  isActive
+                    ? 'border-brand-primary text-fg font-semibold hover:bg-brand-primary/5'
+                    : 'border-border-strong text-fg-muted hover:bg-elevated hover:border-fg-muted hover:text-fg',
+                ].join(' ')}
+              >
+                {FILTER_LABEL[f]}
+              </button>
+            )
+          })}
+        </div>
+
+        <div className="flex flex-col gap-2">
+          {filteredClassifications.map(item => (
+            <TriageCard
+              key={item.rule_id}
+              item={item}
+              decision={decisions[item.rule_id] ?? 'pending'}
+              onDecide={setDecision}
+              readOnly={readOnly}
+            />
+          ))}
         </div>
       </div>
 
-      {/* Filter tabs */}
-      <div className="flex gap-1">
-        {(['all', 'needs_decision', 'fixable', 'unfixable'] as FilterMode[]).map(f => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              filter === f
-                ? 'bg-indigo/20 text-indigo-300 border border-indigo/40'
-                : 'bg-surface border border-border text-text-muted hover:border-indigo/30'
-            }`}
-          >
-            {f === 'all' ? 'All' : f === 'needs_decision' ? 'Needs Decision' : f === 'fixable' ? 'Fixable' : 'Unfixable/Error'}
-          </button>
-        ))}
-      </div>
+      {error && (
+        <div
+          data-testid="triage-error"
+          className="bg-danger/15 border-t border-danger/30 px-6 py-2 text-xs text-danger-deep shrink-0"
+        >
+          {error}
+        </div>
+      )}
 
-      {/* Cards */}
-      <div className="space-y-3">
-        {filteredClassifications.map(item => (
-          <TriageCard
-            key={item.rule_id}
-            item={item}
-            decision={decisions[item.rule_id] ?? 'pending'}
-            onDecide={setDecision}
-            readOnly={readOnly}
-          />
-        ))}
-      </div>
-
-      {/* Submit */}
       {needsDecision.length > 0 && !readOnly && (
-        <div className="sticky bottom-4 pt-2">
-          <div className="rounded-xl bg-elevated border border-border p-4 flex items-center justify-between gap-4 shadow-lg">
-            <div className="text-sm text-text-muted">
-              {canSubmit
-                ? 'All decisions made — ready to proceed.'
-                : <><span className="text-warning font-semibold">{pendingCount}</span> {pendingCount === 1 ? 'rule needs' : 'rules need'} a decision.</>
-              }
-            </div>
-            <button
-              onClick={handleSubmit}
-              disabled={!canSubmit || submitting}
-              className="px-4 py-2 rounded-lg bg-indigo text-white text-sm font-semibold hover:bg-indigo/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              {submitting ? 'Submitting...' : 'Apply Triage Decisions →'}
-            </button>
+        <div
+          data-testid="triage-footer"
+          className="bg-surface border-t border-border px-6 py-3 flex items-center gap-4 shrink-0"
+        >
+          <div className="flex items-center gap-4">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-success" />
+              <span className="text-[12px] font-medium text-success-deep">{acceptedCount} Accepted</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-danger" />
+              <span className="text-[12px] font-medium text-danger-deep">{keptCount} Kept</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-border-strong" />
+              <span className="text-[12px] font-medium text-fg-muted">{pendingCount} Pending</span>
+            </span>
           </div>
-          {error && (
-            <div className="mt-2 rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-2 text-xs text-red-400">
-              {error}
-            </div>
-          )}
+          <div className="flex-1" />
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!canSubmit || submitting}
+            data-testid="apply-triage-decisions"
+            className="inline-flex items-center gap-1.5 bg-brand-accent text-on-brand text-[13px] font-semibold px-4 py-2 rounded-md hover:bg-brand-accent/90 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+          >
+            {submitting ? 'Submitting…' : 'Apply Triage Decisions'}
+            {!submitting && <ArrowRight size={14} strokeWidth={2} aria-hidden />}
+          </button>
         </div>
       )}
     </div>

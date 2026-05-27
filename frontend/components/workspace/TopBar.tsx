@@ -1,4 +1,7 @@
 import Link from 'next/link'
+import { Ellipsis } from 'lucide-react'
+import { Logo } from '@/components/theme/Logo'
+import { Chip, type ScoreTone } from '@/components/ui/Chip'
 
 interface Props {
   filename: string
@@ -8,21 +11,51 @@ interface Props {
 }
 
 export function TopBar({ filename, rowCount, colCount, currentScore }: Props) {
-  const pct = currentScore ? Math.round(currentScore * 100) : null
-  const scoreColor = pct === null ? '' : pct >= 90 ? 'text-success-light border-success/40 bg-success/10' : pct >= 70 ? 'text-warning border-warning/40 bg-warning/10' : 'text-danger-light border-danger/40 bg-danger/10'
+  const pct = currentScore != null ? Math.round(currentScore * 100) : null
+  const tone: ScoreTone | null =
+    pct === null ? null : pct >= 90 ? 'success' : pct >= 70 ? 'warning' : 'danger'
 
   return (
-    <div className="h-11 bg-elevated border-b border-border flex items-center gap-3 px-4 shrink-0">
-      <div className="w-6 h-6 rounded-md flex items-center justify-center text-xs shrink-0" style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}>⬡</div>
-      <Link href="/" className="text-text-muted text-xs hover:text-text-secondary">← Sessions</Link>
-      <span className="text-border">/</span>
-      <span className="font-semibold text-sm text-text-primary">{filename}</span>
-      {rowCount && <span className="text-xs text-text-muted">{rowCount.toLocaleString()} rows · {colCount} cols</span>}
-      {pct !== null && (
-        <div className={`ml-auto border rounded-full px-2.5 py-0.5 text-xs font-semibold ${scoreColor}`}>
-          Score: {pct}%
-        </div>
+    <div className="h-14 bg-surface border-b border-border flex items-center gap-3 px-4 shrink-0">
+      {/* Logo */}
+      <Logo />
+
+      {/* App title */}
+      <span className="text-sm font-semibold text-fg">DQ Accelerator</span>
+
+      {/* Vertical separator */}
+      <span className="w-px h-[18px] bg-border-strong self-center" />
+
+      {/* Sessions link */}
+      <Link href="/" className="text-sm text-fg-muted hover:text-fg">
+        ← Sessions
+      </Link>
+
+      {/* Breadcrumb slash */}
+      <span className="text-border-strong">/</span>
+
+      {/* Filename */}
+      <span className="text-sm font-semibold text-fg">{filename}</span>
+
+      {/* Row/col metadata */}
+      {rowCount != null && (
+        <span className="text-xs text-fg-muted">
+          {rowCount.toLocaleString()} rows · {colCount} cols
+        </span>
       )}
+
+      {/* Spacer */}
+      <span className="flex-1" />
+
+      {/* Score chip */}
+      {pct !== null && tone !== null && (
+        <Chip variant="score" tone={tone}>
+          <span data-variant={tone}>Score: {pct}%</span>
+        </Chip>
+      )}
+
+      {/* Three-dots overflow indicator */}
+      <Ellipsis size={16} strokeWidth={2} className="text-fg-muted" />
     </div>
   )
 }
