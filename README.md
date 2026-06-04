@@ -2,8 +2,6 @@
 
 A guided, agentic data quality workflow that takes a raw dataset through profiling, rule validation, anomaly triage, iterative transformation, and production pipeline generation — with human approval at every decision point.
 
-**Try it:** upload [`samples/loan_applications.csv`](samples/loan_applications.csv) to walk the full pipeline against engineered data-quality issues (200 rows, all three Profile alert buckets, 8–10 proposed rules with failing samples).
-
 ---
 
 ## Getting Started (First-Time Setup)
@@ -13,6 +11,7 @@ A guided, agentic data quality workflow that takes a raw dataset through profili
 - Docker and Docker Compose
 - [Homebrew](https://brew.sh) Python 3.12: `brew install python@3.12`
 - [uv](https://docs.astral.sh/uv/): `curl -LsSf https://astral.sh/uv/install.sh | sh`
+- Node.js 20.9+ and npm (for the Next.js frontend)
 - An Anthropic API key
 
 ### 1. Clone and configure environment
@@ -29,9 +28,10 @@ cp .env.example .env
 ```bash
 uv venv .venv --python /opt/homebrew/bin/python3.12
 uv pip install -e ".[dev]" --python .venv/bin/python
+npm install --prefix frontend
 ```
 
-### 3. Start infrastructure
+### 3. Start infrastructure (optional — dev.sh does this automatically)
 
 ```bash
 docker compose up -d postgresql temporal temporal-ui
@@ -41,6 +41,8 @@ This starts:
 - PostgreSQL on port 5433 (Temporal + app database)
 - Temporal server on port 7233
 - Temporal UI at http://127.0.0.1:8088
+
+`./dev.sh` (next step) runs this command itself, so you only need it when you want the infrastructure containers without the app processes.
 
 ### 4. Start the full dev stack
 
@@ -57,6 +59,14 @@ The UI is at **http://127.0.0.1:3000**.
 ```bash
 curl http://127.0.0.1:8000/health
 ```
+
+### Alternative: run everything in Docker
+
+```bash
+docker compose up -d
+```
+
+This builds and runs the full stack — infrastructure plus the API, Temporal worker, and frontend — inside containers. It only needs `ANTHROPIC_API_KEY` in `.env`; no local virtualenv or Node install required.
 
 ---
 
@@ -205,10 +215,10 @@ ai-dq-accelerator/
 ## Running Tests
 
 ```bash
-pytest                          # all tests
-pytest tests/path/to/test.py    # single file
-pytest -k "test_name"           # by name pattern
-pytest --cov=dq_tools           # with coverage
+uv run pytest                          # all tests
+uv run pytest tests/path/to/test.py    # single file
+uv run pytest -k "test_name"           # by name pattern
+uv run pytest --cov=dq_tools           # with coverage
 ```
 
 Tests use `asyncio_mode = "auto"` — no `@pytest.mark.asyncio` decorator needed.
@@ -216,7 +226,7 @@ Tests use `asyncio_mode = "auto"` — no `@pytest.mark.asyncio` decorator needed
 ## Lint and Format
 
 ```bash
-ruff check .          # lint
-ruff check . --fix    # auto-fix
-ruff format .         # format
+uv run ruff check .          # lint
+uv run ruff check . --fix    # auto-fix
+uv run ruff format .         # format
 ```
